@@ -39,7 +39,7 @@ end
 
 system.reset = function()
     return {
-        userName = "noName",
+        userName = "fashaodesu",
         mode = modelist.spaceShip,
         HOME = { x = 0, y = 120, z = 0 },
         omega_P = 2,                            --角速度比例, 决定转向快慢
@@ -53,8 +53,7 @@ system.reset = function()
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         pointList = {                           --点循环模式，按照顺序逐个前往
-            { x = -4499, y = 74, z = -896, yaw = 90,  flip = true },
-            { x = -4491, y = 78, z = -915, yaw = -90, flip = false }
+            { x = -4499, y = 74, z = -896, yaw = 0,  flip = false }
         }
     }
 end
@@ -214,6 +213,11 @@ attUtil.getAtt = function()
     attUtil.size = ship.getSize()
     attUtil.position = ship.getWorldspacePosition()
     attUtil.quat = ship.getQuaternion()
+    attUtil.conjQuat = {}
+    attUtil.conjQuat.w = attUtil.quat.w
+    attUtil.conjQuat.x = -attUtil.quat.x
+    attUtil.conjQuat.y = -attUtil.quat.y
+    attUtil.conjQuat.z = -attUtil.quat.z
     attUtil.matrix = ship.getRotationMatrix()
     attUtil.eulerAngle = getEulerByMatrix(attUtil.matrix)
     --attUtil.eulerAngle = quat2Euler(attUtil.quat)
@@ -360,6 +364,7 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
             0,
             zVal * p * attUtil.mass)
+
         pdControl.lastPos = attUtil.position
         pdControl.lastEuler = attUtil.eulerAngle
         if xVal == 0 and yVal == 0 and zVal == 0 then
@@ -422,6 +427,18 @@ pdControl.rotate2Euler = function(euler)
     pdControl.rotInner(roll, yaw, pitch, property.omega_P, property.omega_D)
 end
 
+pdControl.rotate2Euler2 = function(euler)
+    local tmpx = {x = -math.cos(math.rad(euler.yaw)), y = -math.sin(math.rad(euler.pitch)), z = math.sin(math.rad(euler.yaw))}
+    local tmpz = {x = math.sin(math.rad(euler.yaw)), y = math.sin(math.rad(euler.roll)), z = -math.cos(math.rad(euler.yaw))}
+    local newXpoint = RotateVectorByQuat(attUtil.conjQuat, tmpx)
+    local newZpoint = RotateVectorByQuat(attUtil.conjQuat, tmpz)
+    local roll = math.deg(math.asin(newZpoint.y))
+    local yaw = math.deg(math.atan2(newXpoint.z, -newXpoint.x))
+    local pitch = -math.deg(math.asin(newXpoint.y))
+    --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(roll, yaw, pitch))
+    pdControl.rotInner(roll, yaw, pitch, property.omega_P, property.omega_D)
+end
+
 pdControl.spaceShip = function()
     pdControl.moveWithRot(
         math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
@@ -437,19 +454,47 @@ pdControl.spaceShip = function()
         property.omega_D)
 end
 
-pdControl.quadHover = function()
-    tags.quadFpv_Auto_Y = true
-    pdControl.quadUp(
-        0,
-        property.quad_move_P,
-        property.move_D,
-        true)
-    local eulerAg = {}
-end
 
 pdControl.quadFPV = function()
     if tags.quadAutoHover then
-        pdControl.quadHover()
+        if joyUtil.l_fb == 0 then
+            tags.quadFpv_Auto_Y = true
+            pdControl.quadUp(
+                0,
+                property.quad_move_P,
+                property.move_D,
+                true)
+        else
+            pdControl.quadUp(
+                math.deg(math.asin(joyUtil.l_fb)),
+                property.quad_move_P,
+                property.move_D,
+                false)
+        end
+
+        if joyUtil.r_lr == 0 and joyUtil.l_lr == 0 and joyUtil.r_fb == 0 then
+            local newVel = {}
+            local distance = math.sqrt(attUtil.velocity.x ^ 2 + attUtil.velocity.z ^ 2 + attUtil.velocity.y ^ 2)
+            newVel.x = attUtil.velocity.x / distance
+            newVel.y = attUtil.velocity.y / distance
+            newVel.z = attUtil.velocity.z / distance
+            if newVel.x ~= newVel.x then newVel.x = 0 end
+            if newVel.y ~= newVel.y then newVel.y = 0 end
+            if newVel.z ~= newVel.z then newVel.z = 0 end
+            newVel = RotateVectorByQuat(attUtil.conjQuat, newVel)
+            local euler = {roll = -math.deg(math.asin(newVel.z)) * distance, yaw = attUtil.eulerAngle.yaw, pitch = math.deg(math.asin(newVel.x)) * distance}
+            euler.roll = math.abs(euler.roll) > 70 and copysign(70, euler.roll) or euler.roll
+            euler.pitch = math.abs(euler.pitch) > 70 and copysign(70, euler.pitch) or euler.pitch
+            pdControl.rotate2Euler(euler)
+        else
+            pdControl.rotate2Euler({
+                roll = math.deg(math.asin(joyUtil.r_lr)) / 1.5,
+                yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 45,
+                pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
+                })
+        end
+        pdControl.lastPos = attUtil.position
+        pdControl.lastEuler = attUtil.eulerAngle
     else
         pdControl.quadUp(
             math.deg(math.asin(joyUtil.l_fb)),
@@ -511,7 +556,6 @@ pdControl.followMouse = function()
     if joyUtil.joy.hasUser() then
         lastAtt = scanner.getRCAngle(16)
     end
-    lastAtt = scanner.getRCAngle(16)
     pdControl.rotate2Euler(lastAtt)
 
     pdControl.moveWithRot(
