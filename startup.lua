@@ -1,12 +1,10 @@
-require("myFunction")
-
 ---------inner---------
 local modelist = {
-    spaceShip   = {y = 3, name = "spaceShip ", flag = false},
-    quadFPV     = {y = 4, name = "quadFPV   ", flag = false},
-    hms_fly     = {y = 5, name = "hms_fly   ", flag = false},
-    follow      = {y = 6, name = "follow    ", flag = false},
-    pointLoop   = {y = 7, name = "pointLoop ", flag = false}
+    spaceShip = { y = 3, name = "spaceShip ", flag = false },
+    quadFPV   = { y = 4, name = "quadFPV   ", flag = false },
+    hms_fly   = { y = 5, name = "hms_fly   ", flag = false },
+    follow    = { y = 6, name = "follow    ", flag = false },
+    pointLoop = { y = 7, name = "pointLoop ", flag = false }
 }
 
 local toMonitor = peripheral.find("monitor")
@@ -45,20 +43,21 @@ system.reset = function()
         homeList = {
             { x = 0, y = 120, z = 0 }
         },
-        omega_P = 1,                            --角速度比例, 决定转向快慢
-        omega_D = 1,                            --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-        space_Acc = 2,                       --星舰模式油门速度
-        quad_Acc = 1,                        --四轴FPV模式油门强度
-        move_D = 1.6,                           --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
-        MAX_MOVE_SPEED = 30,                    --自动驾驶 (点循环、跟随模式) 最大跟随速度
-        pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
+        omega_P = 1,            --角速度比例, 决定转向快慢
+        omega_D = 1,            --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+        space_Acc = 2,          --星舰模式油门速度
+        quad_Acc = 1,           --四轴FPV模式油门强度
+        move_D = 1.6,           --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+        ZeroPoint = 0,
+        MAX_MOVE_SPEED = 30,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
+        pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
         quadAutoHover = false,
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         pointList = {                           --点循环模式，按照顺序逐个前往
-            { x = -4499, y = 74, z = -896, yaw = 0,  flip = false }
+            { x = -4499, y = 74, z = -896, yaw = 0, flip = false }
         }
     }
 end
@@ -67,6 +66,169 @@ system.update = function(file, obj)
     system.file = io.open(file, "w")
     system.file:write(textutils.serialise(obj))
     system.file:close()
+end
+
+-----------function------------
+function copysign(num1, num2)
+    num1 = math.abs(num1)
+    num1 = num2 > 0 and num1 or -num1
+    return num1
+end
+
+function contrarysign(num1, num2)
+    if ((num1 > 0 and num2 < 0) or (num1 < 0 and num2 > 0)) then
+        return true
+    else
+        return false
+    end
+end
+
+function formatN(val, n)
+    n = math.pow(10, n or 1)
+    val = tonumber(val)
+    return math.floor(val * n) / n
+end
+
+function resetAngelRange(angle)
+    if (math.abs(angle) > 180) then
+        angle = math.abs(angle) >= 360 and angle % 360 or angle
+        return -copysign(360 - math.abs(angle), angle)
+    else
+        return angle
+    end
+end
+
+function RotateVectorByQuat(quat, v)
+    local x = quat.x * 2
+    local y = quat.y * 2
+    local z = quat.z * 2
+    local xx = quat.x * x
+    local yy = quat.y * y
+    local zz = quat.z * z
+    local xy = quat.x * y
+    local xz = quat.x * z
+    local yz = quat.y * z
+    local wx = quat.w * x
+    local wy = quat.w * y
+    local wz = quat.w * z
+    local res = {}
+    res.x = (1.0 - (yy + zz)) * v.x + (xy - wz) * v.y + (xz + wy) * v.z
+    res.y = (xy + wz) * v.x + (1.0 - (xx + zz)) * v.y + (yz - wx) * v.z
+    res.z = (xz - wy) * v.x + (yz + wx) * v.y + (1.0 - (xx + yy)) * v.z
+    return res
+end
+
+local FPoint, LPoint
+function quat2Euler(quat)
+    FPoint = RotateVectorByQuat(quat, { x = 1, y = 0, z = 0 })
+    LPoint = RotateVectorByQuat(quat, { x = 0, y = 0, z = -1 })
+    --ag.pitch = math.deg(math.atan2(FPoint.y, copysign(math.sqrt(FPoint.x ^ 2 + FPoint.z ^ 2), TopPoint.y)))
+    --ag.yaw = -math.deg(math.atan2(LPoint.x, -LPoint.z))
+    --[[     if math.abs(FPoint.y) < 0.1 then
+        ag.yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
+    else
+        ag.yaw = math.deg(math.atan2(TopPoint.z, -TopPoint.x))
+        if FPoint.y < 0 then
+            ag.yaw = resetAngelRange(ag.yaw - 180)
+        end
+    end ]]
+    return {
+        roll = math.deg(math.asin(LPoint.y)),
+        pitch = math.deg(math.asin(FPoint.y)),
+        yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
+    }
+end
+
+function getEulerByMatrix(matrix)
+    return {
+        yaw = math.deg(math.atan2(matrix[1][3], matrix[3][3])),
+        pitch = math.deg(math.atan2(matrix[2][1], matrix[2][2])),
+        roll = math.deg(math.atan2(-matrix[2][3], matrix[2][2]))
+    }
+end
+
+function getEulerByMatrixLeft(matrix)
+    ag.yaw = math.deg(math.atan2(matrix[3][3], matrix[1][3]))
+    ag.pitch = math.deg(math.atan2(matrix[2][1], matrix[2][2]))
+    ag.roll = math.deg(math.atan2(matrix[2][3], matrix[2][2]))
+    return ag
+end
+
+function euler2Quat(roll, yaw, pitch)
+    local cy = math.cos(math.rad(yaw) * 0.5)
+    local sy = math.sin(math.rad(yaw) * 0.5)
+    local cp = math.cos(math.rad(pitch) * 0.5)
+    local sp = math.sin(math.rad(pitch) * 0.5)
+    local cr = math.cos(math.rad(roll) * 0.5)
+    local sr = math.sin(math.rad(roll) * 0.5)
+    local q = {
+        w = cy * cp * cr + sy * sp * sr,
+        x = cy * cp * sr - sy * sp * cr,
+        y = sy * cp * sr + cy * sp * cr,
+        z = sy * cp * cr - cy * sp * sr
+    }
+    return q
+end
+
+function quat2Axis(q)
+    local angle = math.deg(math.acos(q.w) * 2)
+    local s = math.sqrt(1 - q.w * q.w)
+    local result = {}
+    if (s < 0.001) then
+        result.x = q.x
+        result.y = q.y
+        result.z = q.z
+    else
+        result.x = q.x / s
+        result.y = q.y / s
+        result.z = q.z / s
+    end
+    result.x = resetAngelRange(result.x * angle)
+    result.y = resetAngelRange(result.y * angle)
+    result.z = resetAngelRange(result.z * angle)
+    --result.x = math.deg(math.asin(result.x))
+    --result.y = math.deg(math.asin(result.y))
+    --result.z = math.deg(math.asin(result.z))
+    return result
+end
+
+function genParticle(x, y, z)
+    commands.execAsync(string.format("particle electric_spark %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+end
+
+function genShootParticle(x, y, z)
+    commands.execAsync(string.format("particle sonic_boom %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+end
+
+function genParticleBomm(x, y, z)
+    commands.execAsync(string.format("summon creeper %0.6f %0.6f %0.6f {ExplosionRadius:6,Fuse:0}", x, y, z))
+end
+
+function playFpvFanSound(x, y, z, pitch)
+    commands.execAsync(string.format("playsound entity.bee.loop neutral @e[type=minecraft:player] %d %d %d 2 %0.4f 0.5",
+        x, y, z, pitch))
+end
+
+function table.contains(table, element)
+    for _, value in pairs(table) do
+        if value == element then
+            return true
+        end
+    end
+    return false
+end
+
+function split(input, delimiter)
+    input = tostring(input)
+    delimiter = tostring(delimiter)
+    if (delimiter == "") then return false end
+    local pos, arr = 0, {}
+    for st, sp in function() return string.find(input, delimiter, pos, true) end do
+        table.insert(arr, string.sub(input, pos, st - 1))
+        pos = sp + 1
+    end
+    table.insert(arr, string.sub(input, pos))
+    return arr
 end
 
 -----------rayCaster-----------
@@ -355,30 +517,21 @@ pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
 end
 
 pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
-    if xVal == 0 and yVal == 0 and zVal == 0 and pdControl.fixCd >= 40 then
-        pdControl.gotoPosition(nil, pdControl.lastPos)
-    else
-        p = p * 2
-        d = d * 200
-        pdControl.xSpeed = -attUtil.velocity.x * d
-        pdControl.zSpeed = -attUtil.velocity.z * d
-        pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
+    p = p * 2
+    d = d * 200
+    pdControl.xSpeed = -attUtil.velocity.x * d
+    pdControl.zSpeed = -attUtil.velocity.z * d
+    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
 
-        ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
-            pdControl.ySpeed * attUtil.mass,
-            pdControl.zSpeed * attUtil.mass)
+    ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
+        pdControl.ySpeed * attUtil.mass,
+        pdControl.zSpeed * attUtil.mass)
 
-        ship.applyRotDependentForce(xVal * p * attUtil.mass,
-            0,
-            zVal * p * attUtil.mass)
+    ship.applyRotDependentForce(xVal * p * attUtil.mass,
+        0,
+        zVal * p * attUtil.mass)
 
-        pdControl.lastPos = attUtil.position
-        if xVal == 0 and yVal == 0 and zVal == 0 then
-            pdControl.fixCd = pdControl.fixCd + 1
-        else
-            pdControl.fixCd = 0
-        end
-    end
+    pdControl.lastPos = attUtil.position
 end
 
 pdControl.quadUp = function(yVal, p, d, hov)
@@ -386,9 +539,9 @@ pdControl.quadUp = function(yVal, p, d, hov)
     d = d * 200
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
-        pdControl.ySpeed = yVal * p + pdControl.basicYSpeed * 2 + -omegaApplyRot.y * d
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p + pdControl.basicYSpeed * 2 + -omegaApplyRot.y * d
     else
-        pdControl.ySpeed = yVal * p
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p
     end
 
     ship.applyRotDependentForce(0, pdControl.ySpeed * attUtil.mass, 0)
@@ -404,12 +557,12 @@ end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     --commands.execAsync(("say omegaRoll=%0.8f"):format(attUtil.omega.roll))
-    pdControl.pitchSpeed    = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
-    pdControl.rollSpeed     = (attUtil.omega.roll  + xRot) * p + -attUtil.omega.roll  * 7 * d
-    pdControl.yawSpeed      = (attUtil.omega.yaw   + yRot) * p + -attUtil.omega.yaw   * 7 * d
+    pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
+    pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
+    pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
     ship.applyRotDependentTorque(
-        pdControl.rollSpeed  * attUtil.MomentOfInertiaTensor[1][1],
-        pdControl.yawSpeed   * attUtil.MomentOfInertiaTensor[1][1],
+        pdControl.rollSpeed * attUtil.MomentOfInertiaTensor[1][1],
+        pdControl.yawSpeed * attUtil.MomentOfInertiaTensor[1][1],
         pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor[1][1])
 end
 
@@ -434,8 +587,18 @@ pdControl.rotate2Euler = function(euler)
 end
 
 pdControl.rotate2Euler2 = function(euler)
-    local tmpx = {x = -math.cos(math.rad(euler.yaw)), y = -math.sin(math.rad(euler.pitch)), z = math.sin(math.rad(euler.yaw))}
-    local tmpz = {x = math.sin(math.rad(euler.yaw)), y = math.sin(math.rad(euler.roll)), z = -math.cos(math.rad(euler.yaw))}
+    local tmpx = {
+        x = -math.cos(math.rad(euler.yaw)),
+        y = -math.sin(math.rad(euler.pitch)),
+        z = math.sin(math.rad(euler
+            .yaw))
+    }
+    local tmpz = {
+        x = math.sin(math.rad(euler.yaw)),
+        y = math.sin(math.rad(euler.roll)),
+        z = -math.cos(math.rad(euler
+            .yaw))
+    }
     local newXpoint = RotateVectorByQuat(attUtil.conjQuat, tmpx)
     local newZpoint = RotateVectorByQuat(attUtil.conjQuat, tmpz)
     local roll = math.deg(math.asin(newZpoint.y))
@@ -487,7 +650,12 @@ pdControl.quadFPV = function()
             if newVel.y ~= newVel.y then newVel.y = 0 end
             if newVel.z ~= newVel.z then newVel.z = 0 end
             newVel = RotateVectorByQuat(attUtil.conjQuat, newVel)
-            local euler = {roll = -math.deg(math.asin(newVel.z)) * distance, yaw = attUtil.eulerAngle.yaw, pitch = math.deg(math.asin(newVel.x)) * distance}
+            local euler = {
+                roll = -math.deg(math.asin(newVel.z)) * distance,
+                yaw = attUtil.eulerAngle.yaw,
+                pitch = math
+                    .deg(math.asin(newVel.x)) * distance
+            }
             euler.roll = math.abs(euler.roll) > 70 and copysign(70, euler.roll) or euler.roll
             euler.pitch = math.abs(euler.pitch) > 70 and copysign(70, euler.pitch) or euler.pitch
             pdControl.rotate2Euler(euler)
@@ -496,7 +664,7 @@ pdControl.quadFPV = function()
                 roll = math.deg(math.asin(joyUtil.r_lr)) / 1.5,
                 yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 45,
                 pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
-                })
+            })
         end
         pdControl.lastPos = attUtil.position
         pdControl.lastEuler = attUtil.eulerAngle
@@ -614,14 +782,15 @@ end
 monitorUtil = {
     monitor = nil,
     mainPage = {
-        modeSelect   = {x = 1,  name = " MOD ", flag = true},
-        attIndicator = {x = 6,  name = " ATT ", flag = false},
-        settings     = {x = 11, name = " SET ", flag = false}
+        modeSelect   = { x = 1, name = " MOD ", flag = true },
+        attIndicator = { x = 6, name = " ATT ", flag = false },
+        settings     = { x = 11, name = " SET ", flag = false }
     },
     settingPage = {
-        PD_Tuning   = {y = 3, name = "PD_Tuning  ", selected = false, flag = false},
-        User_Change = {y = 4, name = "User_Change", selected = false, flag = false},
-        HOME_SET    = {y = 5, name = "Home_Set   ", selected = false, flag = false}
+        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
+        User_Change = { y = 4, name = "User_Change", selected = false, flag = false },
+        HOME_SET    = { y = 5, name = "Home_Set   ", selected = false, flag = false },
+        Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false }
     },
     playerList = {}
 }
@@ -668,7 +837,7 @@ monitorUtil.refresh = function()
         end
     end
 
-    if monitorUtil.mainPage.modeSelect.flag then     --modePage
+    if monitorUtil.mainPage.modeSelect.flag then --modePage
         for key, mode in pairs(modelist) do
             monitorUtil.monitor.setCursorPos(2, mode.y)
             if mode.flag then
@@ -686,8 +855,8 @@ monitorUtil.refresh = function()
                 monitorUtil.monitor.blit(" N", "88", "33")
             end
         end
-    elseif monitorUtil.mainPage.attIndicator.flag then   --attPage
---[[         for i = 8, 1, -1 do
+    elseif monitorUtil.mainPage.attIndicator.flag then --attPage
+        --[[         for i = 8, 1, -1 do
             monitorUtil.monitor.setCursorPos(8 + math.floor(attUtil.pX.z * i + 0.5),6 + math.floor(-attUtil.pX.x * (i / 2) + 0.5))
             monitorUtil.monitor.blit(" ", "3", "e")
             monitorUtil.monitor.setCursorPos(8 + math.floor(-attUtil.pZ.z * i + 0.5),6 + math.floor(attUtil.pZ.x * (i / 2) + 0.5))
@@ -698,83 +867,105 @@ monitorUtil.refresh = function()
 
         monitorUtil.monitor.setCursorPos(1, 2)
         for i = 1, 15, 1 do
-            monitorUtil.monitor.setCursorPos(i , 2)
+            monitorUtil.monitor.setCursorPos(i, 2)
             monitorUtil.monitor.blit(".", "0", "3")
         end
 
         local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
         local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
         if attUtil.pX.x > 0 then
-            monitorUtil.monitor.setCursorPos(8 + zPoint , 2)
+            monitorUtil.monitor.setCursorPos(8 + zPoint, 2)
             monitorUtil.monitor.blit("W", "0", "3")
         else
-            monitorUtil.monitor.setCursorPos(8 - zPoint , 2)
+            monitorUtil.monitor.setCursorPos(8 - zPoint, 2)
             monitorUtil.monitor.blit("E", "0", "3")
         end
 
         if attUtil.pX.z > 0 then
-            monitorUtil.monitor.setCursorPos(8 + xPoint , 2)
+            monitorUtil.monitor.setCursorPos(8 + xPoint, 2)
             monitorUtil.monitor.blit("N", "e", "3")
         else
-            monitorUtil.monitor.setCursorPos(8 - xPoint , 2)
+            monitorUtil.monitor.setCursorPos(8 - xPoint, 2)
             monitorUtil.monitor.blit("S", "b", "3")
         end
-    elseif monitorUtil.mainPage.settings.flag then   --settingPage
+    elseif monitorUtil.mainPage.settings.flag then --settingPage
         if monitorUtil.settingPage.PD_Tuning.flag then
-            monitorUtil.monitor.setCursorPos(1 , 2)
+            monitorUtil.monitor.setCursorPos(1, 2)
             monitorUtil.monitor.blit("<<", "24", "33")
 
-            monitorUtil.monitor.setCursorPos(2 , 3)
+            monitorUtil.monitor.setCursorPos(2, 3)
             monitorUtil.monitor.blit("P: --      ++", "1ffffffffffff", "333b53333331e")
-            monitorUtil.monitor.setCursorPos(8 , 3)
-            print(string.format("%0.2f",properties.omega_P))
+            monitorUtil.monitor.setCursorPos(8, 3)
+            print(string.format("%0.2f", properties.omega_P))
 
-            monitorUtil.monitor.setCursorPos(2 , 4)
+            monitorUtil.monitor.setCursorPos(2, 4)
             monitorUtil.monitor.blit("D: --      ++", "9ffffffffffff", "333b53333331e")
-            monitorUtil.monitor.setCursorPos(8 , 4)
-            print(string.format("%0.2f",properties.omega_D))
+            monitorUtil.monitor.setCursorPos(8, 4)
+            print(string.format("%0.2f", properties.omega_D))
 
-            monitorUtil.monitor.setCursorPos(2 , 6)
+            monitorUtil.monitor.setCursorPos(2, 6)
             monitorUtil.monitor.blit("spaceAcc-   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11 , 6)
-            print(string.format("%0.1f",properties.space_Acc))
+            monitorUtil.monitor.setCursorPos(11, 6)
+            print(string.format("%0.1f", properties.space_Acc))
 
-            monitorUtil.monitor.setCursorPos(2 , 7)
+            monitorUtil.monitor.setCursorPos(2, 7)
             monitorUtil.monitor.blit("quad_Acc-   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11 , 7)
-            print(string.format("%0.1f",properties.quad_Acc))
+            monitorUtil.monitor.setCursorPos(11, 7)
+            print(string.format("%0.1f", properties.quad_Acc))
 
-            monitorUtil.monitor.setCursorPos(2 , 8)
+            monitorUtil.monitor.setCursorPos(2, 8)
             monitorUtil.monitor.blit("MOVE_D: -   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11 , 8)
-            print(string.format("%0.1f",properties.move_D))
-
+            monitorUtil.monitor.setCursorPos(11, 8)
+            print(string.format("%0.1f", properties.move_D))
         elseif monitorUtil.settingPage.User_Change.flag then
-            monitorUtil.monitor.setCursorPos(1 , 2)
+            monitorUtil.monitor.setCursorPos(1, 2)
             monitorUtil.monitor.blit("<<", "24", "33")
 
-            monitorUtil.monitor.setCursorPos(2 , 3)
+            monitorUtil.monitor.setCursorPos(2, 3)
             monitorUtil.monitor.blit("selectUser:", "fffffffffff", "33333333333")
 
             for i = 1, 5, 1 do
                 if monitorUtil.playerList[i] then
                     local name = monitorUtil.playerList[i].name
-                    monitorUtil.monitor.setCursorPos(2 , 3 + i)
+                    monitorUtil.monitor.setCursorPos(2, 3 + i)
                     if name == properties.userName then
                         for j = 1, 10, 1 do
-                            monitorUtil.monitor.blit(name:sub(j, j), "f", "4")
+                            local tmpChar = name:sub(j, j)
+                            if #tmpChar ~= 0 then
+                                monitorUtil.monitor.blit(tmpChar, "f", "4")
+                            end
                         end
                     else
                         for j = 1, 10, 1 do
-                            monitorUtil.monitor.blit(name:sub(j, j), "0", "3")
+                            local tmpChar = name:sub(j, j)
+                            if #tmpChar ~= 0 then
+                                monitorUtil.monitor.blit(tmpChar, "0", "3")
+                            end
                         end
                     end
                 end
             end
         elseif monitorUtil.settingPage.HOME_SET.flag then
-            monitorUtil.monitor.setCursorPos(1 , 2)
+            monitorUtil.monitor.setCursorPos(1, 2)
             monitorUtil.monitor.blit("<<", "24", "33")
-            
+        elseif monitorUtil.settingPage.Simulate.flag then
+            monitorUtil.monitor.setCursorPos(1, 2)
+            monitorUtil.monitor.blit("<<", "24", "33")
+
+            monitorUtil.monitor.setCursorPos(2, 4)
+            monitorUtil.monitor.blit("AirMass-    +", "fffffffffffff", "3333333b3333e")
+            monitorUtil.monitor.setCursorPos(10, 4)
+            print(string.format("%0.1f", properties.airMass))
+
+            monitorUtil.monitor.setCursorPos(2, 6)
+            monitorUtil.monitor.blit("Gravity-    +", "fffffffffffff", "3333333b3333e")
+            monitorUtil.monitor.setCursorPos(10, 6)
+            print(string.format("%0.1f", properties.quadGravity))
+
+            monitorUtil.monitor.setCursorPos(2, 8)
+            monitorUtil.monitor.blit("0_Point-    +", "fffffffffffff", "3333333b3333e")
+            monitorUtil.monitor.setCursorPos(10, 8)
+            print(string.format("%0.1f", properties.ZeroPoint))
         else
             for key, value in pairs(monitorUtil.settingPage) do
                 monitorUtil.monitor.setCursorPos(2, value.y)
@@ -785,9 +976,6 @@ monitorUtil.refresh = function()
                 end
             end
         end
-
-
-        
     end
 
     --reboot and shutdown
@@ -837,29 +1025,42 @@ monitorUtil.listener = function()
                 end
 
                 if y == 3 then
-                    if x == 5 then      properties.omega_P = properties.omega_P - 0.1
-                    elseif x == 6 then  properties.omega_P = properties.omega_P - 0.01
-                    elseif x == 13 then properties.omega_P = properties.omega_P + 0.01
-                    elseif x == 14 then properties.omega_P = properties.omega_P + 0.1
+                    if x == 5 then
+                        properties.omega_P = properties.omega_P - 0.1
+                    elseif x == 6 then
+                        properties.omega_P = properties.omega_P - 0.01
+                    elseif x == 13 then
+                        properties.omega_P = properties.omega_P + 0.01
+                    elseif x == 14 then
+                        properties.omega_P = properties.omega_P + 0.1
                     end
                 elseif y == 4 then
-                    if x == 5 then      properties.omega_D = properties.omega_D - 0.1
-                    elseif x == 6 then  properties.omega_D = properties.omega_D - 0.01
-                    elseif x == 13 then properties.omega_D = properties.omega_D + 0.01
-                    elseif x == 14 then properties.omega_D = properties.omega_D + 0.1
+                    if x == 5 then
+                        properties.omega_D = properties.omega_D - 0.1
+                    elseif x == 6 then
+                        properties.omega_D = properties.omega_D - 0.01
+                    elseif x == 13 then
+                        properties.omega_D = properties.omega_D + 0.01
+                    elseif x == 14 then
+                        properties.omega_D = properties.omega_D + 0.1
                     end
 
-                    if properties.omega_D >= 1 then properties.omega_D = 1 end
+                    if properties.omega_D >= 2 then properties.omega_D = 2 end
                 elseif y == 6 then
-                    if x == 10 then properties.space_Acc = properties.space_Acc - 0.1
-                    elseif x == 14 then properties.space_Acc = properties.space_Acc + 0.1
+                    if x == 10 then
+                        properties.space_Acc = properties.space_Acc - 0.1
+                    elseif x == 14 then
+                        properties.space_Acc = properties.space_Acc + 0.1
                     end
                 elseif y == 7 then
-                    if x == 10 then properties.quad_Acc = properties.quad_Acc - 0.1
-                    elseif x == 14 then properties.quad_Acc = properties.quad_Acc + 0.1
+                    if x == 10 then
+                        properties.quad_Acc = properties.quad_Acc - 0.1
+                    elseif x == 14 then
+                        properties.quad_Acc = properties.quad_Acc + 0.1
                     end
                 elseif y == 8 then
-                    if x == 10 then properties.move_D = properties.move_D - 0.1
+                    if x == 10 then
+                        properties.move_D = properties.move_D - 0.1
                     elseif x == 14 then
                         if properties.move_D < 1.6 then
                             properties.move_D = properties.move_D + 0.1
@@ -878,11 +1079,39 @@ monitorUtil.listener = function()
                         properties.userName = user.name
                     end
                 end
-
             elseif monitorUtil.settingPage.HOME_SET.flag then
                 if y == 2 and x < 3 then
                     monitorUtil.settingPage.HOME_SET.flag = false
                     system.update(system.fileName, properties)
+                end
+            elseif monitorUtil.settingPage.Simulate.flag then
+                if y == 2 and x < 3 then
+                    monitorUtil.settingPage.Simulate.flag = false
+                    system.update(system.fileName, properties)
+                end
+
+                if y == 4 then
+                    if x == 9 then
+                        properties.airMass = properties.airMass - 0.1
+                    elseif x == 14 then
+                        properties.airMass = properties.airMass + 0.1
+                    end
+                elseif y == 6 then
+                    if x == 9 then
+                        properties.quadGravity = properties.quadGravity - 0.1
+                    elseif x == 14 then
+                        properties.quadGravity = properties.quadGravity + 0.1
+                    end
+                elseif y == 8 then
+                    if x == 9 then
+                        if properties.ZeroPoint > -1 then
+                            properties.ZeroPoint = properties.ZeroPoint - 0.1
+                        end
+                    elseif x == 14 then
+                        if properties.ZeroPoint < 0 then
+                            properties.ZeroPoint = properties.ZeroPoint + 0.1
+                        end
+                    end
                 end
             else
                 for key, value in pairs(monitorUtil.settingPage) do
@@ -894,7 +1123,8 @@ monitorUtil.listener = function()
                                     monitorUtil.playerList = {}
                                     for k, v in pairs(scanner.entities) do
                                         if v.isPlayer then
-                                            v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 + (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
+                                            v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 +
+                                                (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
                                             table.insert(monitorUtil.playerList, 1, v)
                                         end
                                     end
