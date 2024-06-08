@@ -500,7 +500,6 @@ pdControl = {
     ySpeed = 0,
     zSpeed = 0,
     basicYSpeed = 30,
-    lastPos = ship.getWorldspacePosition(),
     fixCd = 0
 }
 
@@ -531,7 +530,6 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
         0,
         zVal * p * attUtil.mass)
 
-    pdControl.lastPos = attUtil.position
 end
 
 pdControl.quadUp = function(yVal, p, d, hov)
@@ -666,8 +664,6 @@ pdControl.quadFPV = function()
                 pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
             })
         end
-        pdControl.lastPos = attUtil.position
-        pdControl.lastEuler = attUtil.eulerAngle
     else
         pdControl.quadUp(
             math.deg(math.asin(joyUtil.l_fb)),
