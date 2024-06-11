@@ -2,9 +2,10 @@
 local modelist = {
     spaceShip = { y = 3, name = "spaceShip ", flag = false },
     quadFPV   = { y = 4, name = "quadFPV   ", flag = false },
-    hms_fly   = { y = 5, name = "hms_fly   ", flag = false },
-    follow    = { y = 6, name = "follow    ", flag = false },
-    pointLoop = { y = 7, name = "pointLoop ", flag = false }
+    helicopt  = { y = 5, name = "helicopter", flag = false },
+    hms_fly   = { y = 6, name = "hms_fly   ", flag = false },
+    follow    = { y = 7, name = "follow    ", flag = false },
+    pointLoop = { y = 8, name = "pointLoop ", flag = false }
 }
 
 local toMonitor = peripheral.find("monitor")
@@ -21,7 +22,7 @@ system.init = function()
     system.file = io.open(system.fileName, "r")
     if system.file then
         properties = textutils.unserialise(system.file:read("a"))
-        if properties.omega_D > 1 then properties.omega_D = 1 end
+        if properties.omega_D > 1.52 then properties.omega_D = 1.52 end
         system.file:close()
     else
         properties = system.reset()
@@ -44,7 +45,7 @@ system.reset = function()
             { x = 0, y = 120, z = 0 }
         },
         omega_P = 1,            --角速度比例, 决定转向快慢
-        omega_D = 1,            --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+        omega_D = 1.52,         --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
         space_Acc = 2,          --星舰模式油门速度
         quad_Acc = 1,           --四轴FPV模式油门强度
         move_D = 1.6,           --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
@@ -53,6 +54,7 @@ system.reset = function()
         pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
         quadAutoHover = false,
+        spaceShipHov = true,
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
@@ -370,9 +372,9 @@ attUtil = {
     omega = {},
     eulerAngle = {},
     preEuler = {},
-    eulerOmega = {},
     initPoint = {},
-    velocity = {}
+    velocity = {},
+    speed = {}
 }
 
 attUtil.getAtt = function()
@@ -405,14 +407,10 @@ attUtil.getAtt = function()
     attUtil.omega.pitch = math.deg(math.asin(XPoint.y))
     attUtil.omega.yaw = math.deg(math.atan2(-XPoint.z, XPoint.x))
 
-
-    attUtil.eulerOmega.roll = attUtil.eulerAngle.roll - attUtil.preEuler.roll
-    attUtil.eulerOmega.yaw = attUtil.eulerAngle.yaw - attUtil.preEuler.yaw
-    attUtil.eulerOmega.pitch = attUtil.eulerAngle.pitch - attUtil.preEuler.pitch
-
     attUtil.velocity.x = ship.getVelocity().x / 20
     attUtil.velocity.y = ship.getVelocity().y / 20
     attUtil.velocity.z = ship.getVelocity().z / 20
+    attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
     --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(attUtil.eulerAngle.roll, attUtil.eulerAngle.yaw, attUtil.eulerAngle.pitch))
     --commands.execAsync(("say w = %0.2f x=%0.2f  y=%0.2f  z=%0.2f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
 end
@@ -520,7 +518,11 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
     d = d * 200
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
+    if properties.spaceShipHov then
+        pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
+    else
+        pdControl.ySpeed = yVal * p + attUtil.speed / 4 + -attUtil.velocity.y * d
+    end
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
@@ -529,7 +531,6 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
     ship.applyRotDependentForce(xVal * p * attUtil.mass,
         0,
         zVal * p * attUtil.mass)
-
 end
 
 pdControl.quadUp = function(yVal, p, d, hov)
@@ -537,7 +538,8 @@ pdControl.quadUp = function(yVal, p, d, hov)
     d = d * 200
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p + pdControl.basicYSpeed * 2 + -omegaApplyRot.y * d
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p + pdControl.basicYSpeed * 2 +
+            -omegaApplyRot.y * d
     else
         pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p
     end
@@ -554,7 +556,6 @@ pdControl.quadUp = function(yVal, p, d, hov)
 end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
-    --commands.execAsync(("say omegaRoll=%0.8f"):format(attUtil.omega.roll))
     pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
@@ -679,6 +680,28 @@ pdControl.quadFPV = function()
     end
 end
 
+pdControl.helicopter = function ()
+    if joyUtil.l_fb == 0 then
+        pdControl.quadUp(
+            0,
+            properties.quad_Acc,
+            properties.move_D,
+            true)
+    else
+        pdControl.quadUp(
+            math.deg(math.asin(joyUtil.l_fb)),
+            properties.quad_Acc,
+            properties.move_D,
+            false)
+    end
+
+    pdControl.rotate2Euler({
+        roll = math.deg(math.asin(joyUtil.r_lr)) / 2,
+        yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 20 * properties.omega_P,
+        pitch = math.deg(math.asin(joyUtil.r_fb) / 2)
+    })
+end
+
 pdControl.gotoPosition = function(euler, pos)
     local xVal, yVal, zVal
     xVal = (pos.x - attUtil.position.x) * 3.6
@@ -788,6 +811,10 @@ monitorUtil = {
         HOME_SET    = { y = 5, name = "Home_Set   ", selected = false, flag = false },
         Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false }
     },
+    attPage = {
+        compass = { name = "compass", flag = true },
+        level = { name = "level", flag = false }
+    },
     playerList = {}
 }
 
@@ -843,6 +870,12 @@ monitorUtil.refresh = function()
             end
         end
 
+        if properties.mode == modelist.spaceShip.name then
+            monitorUtil.monitor.setCursorPos(12, 3)
+            if properties.spaceShipHov then
+                
+            end
+        end
         if properties.mode == modelist.quadFPV.name then
             monitorUtil.monitor.setCursorPos(12, 4)
             if properties.quadAutoHover then
@@ -852,37 +885,36 @@ monitorUtil.refresh = function()
             end
         end
     elseif monitorUtil.mainPage.attIndicator.flag then --attPage
-        --[[         for i = 8, 1, -1 do
-            monitorUtil.monitor.setCursorPos(8 + math.floor(attUtil.pX.z * i + 0.5),6 + math.floor(-attUtil.pX.x * (i / 2) + 0.5))
-            monitorUtil.monitor.blit(" ", "3", "e")
-            monitorUtil.monitor.setCursorPos(8 + math.floor(-attUtil.pZ.z * i + 0.5),6 + math.floor(attUtil.pZ.x * (i / 2) + 0.5))
-            monitorUtil.monitor.blit(" ", "3", "b")
-            monitorUtil.monitor.setCursorPos(8 + math.floor(-attUtil.pY.z * i + 0.5),6 + math.floor(attUtil.pY.x * (i / 2) + 0.5))
-            monitorUtil.monitor.blit(" ", "3", "5")
-        end ]]
+        if monitorUtil.attPage.compass.flag then       --罗盘
+            monitorUtil.monitor.setCursorPos(1, 2)
+            for i = 1, 15, 1 do
+                monitorUtil.monitor.setCursorPos(i, 2)
+                monitorUtil.monitor.blit(".", "0", "3")
+            end
 
-        monitorUtil.monitor.setCursorPos(1, 2)
-        for i = 1, 15, 1 do
-            monitorUtil.monitor.setCursorPos(i, 2)
-            monitorUtil.monitor.blit(".", "0", "3")
-        end
+            local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
+            local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
+            if attUtil.pX.x > 0 then
+                monitorUtil.monitor.setCursorPos(8 + zPoint, 2)
+                monitorUtil.monitor.blit("W", "0", "3")
+            else
+                monitorUtil.monitor.setCursorPos(8 - zPoint, 2)
+                monitorUtil.monitor.blit("E", "0", "3")
+            end
 
-        local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
-        local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
-        if attUtil.pX.x > 0 then
-            monitorUtil.monitor.setCursorPos(8 + zPoint, 2)
-            monitorUtil.monitor.blit("W", "0", "3")
-        else
-            monitorUtil.monitor.setCursorPos(8 - zPoint, 2)
-            monitorUtil.monitor.blit("E", "0", "3")
-        end
-
-        if attUtil.pX.z > 0 then
-            monitorUtil.monitor.setCursorPos(8 + xPoint, 2)
-            monitorUtil.monitor.blit("N", "e", "3")
-        else
-            monitorUtil.monitor.setCursorPos(8 - xPoint, 2)
-            monitorUtil.monitor.blit("S", "b", "3")
+            if attUtil.pX.z > 0 then
+                monitorUtil.monitor.setCursorPos(8 + xPoint, 2)
+                monitorUtil.monitor.blit("N", "e", "3")
+            else
+                monitorUtil.monitor.setCursorPos(8 - xPoint, 2)
+                monitorUtil.monitor.blit("S", "b", "3")
+            end
+        elseif monitorUtil.attPage.level.flag then --水平仪
+            for i = 1, 128, 1 do
+                local yPoint = math.abs(attUtil.eulerAngle.roll) > 90 and -attUtil.pZ.y or attUtil.pZ.y
+                monitorUtil.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i), 6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
+                monitorUtil.monitor.blit(" ", "0", "0")
+            end
         end
     elseif monitorUtil.mainPage.settings.flag then --settingPage
         if monitorUtil.settingPage.PD_Tuning.flag then
@@ -1041,7 +1073,7 @@ monitorUtil.listener = function()
                         properties.omega_D = properties.omega_D + 0.1
                     end
 
-                    if properties.omega_D >= 2 then properties.omega_D = 2 end
+                    if properties.omega_D >= 1.52 then properties.omega_D = 1.52 end
                 elseif y == 6 then
                     if x == 10 then
                         properties.space_Acc = properties.space_Acc - 0.1
@@ -1169,6 +1201,8 @@ function run()
             pdControl.spaceShip()
         elseif properties.mode == modelist.quadFPV.name then
             pdControl.quadFPV()
+        elseif properties.mode == modelist.helicopt.name then
+            pdControl.helicopter()
         elseif properties.mode == modelist.hms_fly.name then
             pdControl.followMouse()
         elseif properties.mode == modelist.follow.name then
