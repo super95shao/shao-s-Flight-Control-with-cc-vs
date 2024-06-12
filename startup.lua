@@ -24,7 +24,7 @@ system.init = function()
         system.file:close()
     else
         properties = system.reset()
-        system.update(system.fileName, properties)
+        system.updatePersistentData()
     end
 
     for key, value in pairs(modelist) do
@@ -35,6 +35,11 @@ system.init = function()
 end
 
 system.reset = function()
+    local firstMonitor = peripheral.find("monitor")
+    local enabledMonitors = {"computer"}
+    if firstMonitor then
+        table.insert(enabledMonitors, peripheral.getName(firstMonitor))
+    end
     return {
         userName = "fashaodesu",
         mode = modelist.quadFPV.name,
@@ -42,6 +47,7 @@ system.reset = function()
         homeList = {
             { x = 0, y = 120, z = 0 }
         },
+        enabledMonitors = enabledMonitors,
         omega_P = 1,            --角速度比例, 决定转向快慢
         omega_D = 1.52,         --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
         space_Acc = 2,          --星舰模式油门速度
@@ -61,7 +67,11 @@ system.reset = function()
     }
 end
 
-system.update = function(file, obj)
+system.updatePersistentData = function()
+    system.write(system.fileName, properties)
+end
+
+system.write = function(file, obj)
     system.file = io.open(file, "w")
     system.file:write(textutils.serialise(obj))
     system.file:close()
@@ -75,6 +85,38 @@ function tableHasValue (targetTable, targetValue)
         end
     end
     return false
+end
+
+local function joinArrayTables(...)
+	local entries = {}
+	for i = 1, select('#', ... ) do
+		local t = select(i, ... )
+		for i, v in ipairs( t ) do
+			table.insert(entries, v)
+		end
+	end
+	return entries
+end
+
+local function arrayTableDuplicate(targetTable)
+	local entries = {}
+	local seenValues = {}
+	for i, v in ipairs( targetTable ) do
+		if not seenValues[v] then
+			seenValues[v] = true
+			table.insert(entries, v)
+		end
+	end
+	return entries
+end
+
+local function arrayTableRemoveElement(targetTable, value)
+	for i, v in ipairs( targetTable ) do
+		if v == value then
+            table.remove(targetTable, i)
+            return
+		end
+	end
 end
 
 function copysign(num1, num2)
@@ -449,7 +491,8 @@ end
 
 ---------joyUtil---------
 joyUtil = {
-    joy = peripheral.find("tweaked_controller"),
+    joy = nil,
+    joyConntected = false,
     switchCd = 0,
     l_fb = 0,
     l_lr = 0,
@@ -464,7 +507,10 @@ joyUtil = {
 }
 
 joyUtil.getJoyInput = function()
-    if joyUtil.joy.hasUser() then
+    if not joyUtil.joy or not peripheral.hasType(joyUtil.joy,"tweaked_controller") then
+        joyUtil.joy = peripheral.find("tweaked_controller")
+    end
+    if joyUtil.joy and joyUtil.joy.hasUser() then
         joyUtil.l_lr = -joyUtil.joy.getAxis(1)
         joyUtil.l_fb = -joyUtil.joy.getAxis(2)
         joyUtil.r_lr = -joyUtil.joy.getAxis(3)
@@ -809,7 +855,11 @@ pdControl.pointLoop = function()
 end
 ---------screens---------
 
-local abstractScreen = {}
+-- abstractScreen
+-- 空屏幕，所有其他屏幕类的基类
+local abstractScreen = {
+    screenTitle = "blank"
+}
 abstractScreen.__index = abstractScreen
 
 function abstractScreen:init() end
@@ -832,76 +882,60 @@ function abstractScreen:onRootFatal()
         self.monitor.write(":(")
     end
 end
-
-local flightControlScreen = {}
-flightControlScreen.__index = setmetatable(flightControlScreen, abstractScreen)
-
-function flightControlScreen:init()
-    if self.monitor.isColor() then -- 在非高级显示器上停用功能
-        if self.monitor.setTextScale then -- 电脑终端也是显示器
-            self.monitor.setTextScale(0.5)
-        end
-        self.monitor.setBackgroundColor(colors.lightBlue)
-        self.loader = {
-            step = 1,
-            index = 1,
-        }
-        self.mainPage = {
-            modeSelect   = { x = 1, name = " MOD ", flag = true },
-            attIndicator = { x = 6, name = " ATT ", flag = false },
-            settings     = { x = 11, name = " SET ", flag = false }
-        }
-        self.settingPage = {
-            Essentials  = { y = 3, name = "Essentials ", selected = false, flag = false },
-            PD_Tuning   = { y = 4, name = "PD_Tuning  ", selected = false, flag = false },
-            User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
-            HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
-            Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false }
-        }
-        self.attPage = {
-            compass = { name = "compass", flag = true },
-            level = { name = "level", flag = false }
-        }
-        self.enabled = true
+function abstractScreen:onBlank()
+    self.monitor.setTextColor(colors.white)
+    self.monitor.setBackgroundColor(colors.black)
+    self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(1)
     end
 end
+function abstractScreen:report() end
 
-function flightControlScreen:doLoader()
-    if self.loader.step >= 16 then
-        self.monitor.setBackgroundColor(colors.lightBlue)
-        self.loader = nil
-        return
+-- flightGizmoScreen
+-- 飞控系统屏幕
+local flightGizmoScreen = {
+    screenTitle = "gizmo"
+}
+flightGizmoScreen.__index = setmetatable(flightGizmoScreen, abstractScreen)
+
+function flightGizmoScreen:init()
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(0.5)
     end
-    if self.loader.step == 1 then
-        self.monitor.setBackgroundColor(colors.black)
-        self.monitor.clear()
-        self.monitor.setCursorPos(5, 3)
-        self.monitor.blit("WELCOME", "0000000", "fffffff")
+    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.mainPage = {
+        modeSelect   = { x = 1, name = " MOD ", flag = true },
+        attIndicator = { x = 6, name = " ATT ", flag = false },
+        settings     = { x = 11, name = " SET ", flag = false }
+    }
+    self.settingPage = {
+        Essentials  = { y = 3, name = "Essentials ", selected = false, flag = false },
+        PD_Tuning   = { y = 4, name = "PD_Tuning  ", selected = false, flag = false },
+        User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
+        HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
+        Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false }
+    }
+    self.attPage = {
+        compass = { name = "compass", flag = true },
+        level = { name = "level", flag = false }
+    }
+end
 
-        self.monitor.setCursorPos(9 - #properties.userName / 2, 5)
-        self.monitor.write(properties.userName)
-
-        self.monitor.setCursorPos(9 - #self.name/ 2 - 1, 9)
-        self.monitor.write("["..self.name.."]")
-
-        self.monitor.setCursorPos(1, 7)
-    end
-    if self.loader.index >= 14 then self.loader.index = 1 end
-    if self.loader.index < 10 then
-        self.monitor.blit("-", ("%d"):format(self.loader.index), "f")
+function flightGizmoScreen:report()
+    if self.mainPage.modeSelect.flag then
+        return "Tab: MOD"
+    elseif self.mainPage.attIndicator.flag then
+        return "Tab: ATT"
+    elseif self.mainPage.settings.flag then
+        return "Tab: SET"
     else
-        self.monitor.blit("-", ("%s"):format(string.char(self.loader.index + 87)), "f")
+        return "Tab: ?"
     end
-    self.loader.step = self.loader.step + 1
-    self.loader.index = self.loader.index + 1
 end
 
-function flightControlScreen:refresh()
-    if not self.enabled then return end
-    if self.loader ~= nil then
-        self:doLoader()
-        return
-    end
+function flightGizmoScreen:refresh()
     self.monitor.clear()
 
     for key, value in pairs(self.mainPage) do
@@ -1066,13 +1100,12 @@ function flightControlScreen:refresh()
     --reboot and shutdown
     self.monitor.setCursorPos(1, 10)
     self.monitor.blit("[|]", "eee", "333")
-    self.monitor.setCursorPos(13, 10)
     self.monitor.blit("[R]", "444", "333")
+    self.monitor.setCursorPos(13, 10)
+    self.monitor.blit("[X]", "fff", "333")
 end
 
-function flightControlScreen:onTouch(x, y)
-    if not self.enabled then return end
-    if self.loader ~= nil then return end
+function flightGizmoScreen:onTouch(x, y)
     if y < 2 then
         for key, value in pairs(self.mainPage) do
             if x >= value.x and x <= value.x + 4 then
@@ -1104,13 +1137,13 @@ function flightControlScreen:onTouch(x, y)
         if self.settingPage.Essentials.flag then
             if y == 2 and x < 3 then
                 self.settingPage.Essentials.flag = false
-                system.update(system.fileName, properties)
+                system.updatePersistentData()
             end
         elseif self.settingPage.PD_Tuning.flag then
             properties.mode = modelist.spaceShip.name
             if y == 2 and x < 3 then
                 self.settingPage.PD_Tuning.flag = false
-                system.update(system.fileName, properties)
+                system.updatePersistentData()
             end
 
             if y == 3 then
@@ -1159,7 +1192,7 @@ function flightControlScreen:onTouch(x, y)
         elseif self.settingPage.User_Change.flag then
             if y == 2 and x < 3 then
                 self.settingPage.User_Change.flag = false
-                system.update(system.fileName, properties)
+                system.updatePersistentData()
             end
 
             if y >= 4 and y <= 8 then
@@ -1171,12 +1204,12 @@ function flightControlScreen:onTouch(x, y)
         elseif self.settingPage.HOME_SET.flag then
             if y == 2 and x < 3 then
                 self.settingPage.HOME_SET.flag = false
-                system.update(system.fileName, properties)
+                system.updatePersistentData()
             end
         elseif self.settingPage.Simulate.flag then
             if y == 2 and x < 3 then
                 self.settingPage.Simulate.flag = false
-                system.update(system.fileName, properties)
+                system.updatePersistentData()
             end
 
             if y == 4 then
@@ -1231,29 +1264,202 @@ function flightControlScreen:onTouch(x, y)
         end
     end
 
-    if y == 10 and (x >= 13 or x < 4) then
-        self.monitor.setBackgroundColor(colors.black)
-        self.monitor.clear()
-        system.update(system.fileName, properties)
-        if x >= 13 then
-            os.reboot()
-        elseif x < 4 then
+    if y == 10 then
+        if x <= 3 then
+            system.updatePersistentData()
+            monitorUtil.blankAllScreens()
             os.shutdown()
+        elseif x <= 6 then
+            system.updatePersistentData()
+            monitorUtil.blankAllScreens()
+            os.reboot()
+        elseif x >= 13 then
+            monitorUtil.disconnect(self.name)
         end
     end
 end
 
-local screensManagerScreen = {}
+-- screensManagerScreen
+-- 用于管理所有其他的屏幕；主机专属屏幕
+local screensManagerScreen = {
+    screenTitle = "screens manager"
+}
 screensManagerScreen.__index = setmetatable(screensManagerScreen, abstractScreen)
 
 function screensManagerScreen:init()
+    self.rows = {}
 end
 
 function screensManagerScreen:refresh()
-    --todo
+    local redirects = arrayTableDuplicate(joinArrayTables({"computer"},monitorUtil.getMonitorNames(),properties.enabledMonitors))
+	table.sort(redirects, function(n1, n2)
+        local s1 = monitorUtil.getMonitorSort(n1)
+        local s2 = monitorUtil.getMonitorSort(n2)
+        if s1 ~= s2 then
+            return s1 < s2
+        else
+            return n1 < n2
+        end
+	end)
+    self.monitor.setTextColor(colors.white)
+    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    self.monitor.write("Monitors:")
+    local newrows = {}
+    for i, name in ipairs(redirects) do
+        self.monitor.setCursorPos(1, i+1)
+        self.monitor.write(("%2i."):format(i))
+        local status
+        local title
+        local report
+        if not monitorUtil.hasMonitor(name) then
+            self.monitor.setBackgroundColor(colors.red)
+            status = "MISSING"
+        elseif not tableHasValue(properties.enabledMonitors, name) then
+            self.monitor.setBackgroundColor(colors.lightGray)
+            status = "OFFLINE"
+        elseif not monitorUtil.screens[name] then
+            self.monitor.setBackgroundColor(colors.red)
+            status = "ONLINE"
+            title = "???"
+        else
+            local text, color = monitorUtil.screens[name]:report()
+            self.monitor.setBackgroundColor(color or colors.lime)
+            status = "ONLINE"
+            title = monitorUtil.screens[name].screenTitle
+            report = text
+        end
+        table.insert(newrows,name)
+        if name == "computer" then
+            name = os.getComputerLabel() or name
+        end
+        self.monitor.write(name.." ["..status.."]")
+        if title then
+            self.monitor.write("["..title.."]")
+        end
+        if report then
+            self.monitor.write("["..report.."]")
+        end
+        self.monitor.setBackgroundColor(colors.lightBlue)
+    end
+    self.rows = newrows
 end
 
 function screensManagerScreen:onTouch(x, y)
+    local name = self.rows[y-1]
+    if name then
+        if tableHasValue(properties.enabledMonitors, name) then
+            arrayTableRemoveElement(properties.enabledMonitors, name)
+            monitorUtil.disconnect(name)
+        else
+            table.insert(properties.enabledMonitors, name)
+        end
+        system.updatePersistentData()
+    end
+end
+
+-- screenPickerScreen
+-- 用于打开其他的屏幕的屏幕
+local screenPickerScreen = {
+    screenTitle = "idle"
+}
+screenPickerScreen.__index = setmetatable(screenPickerScreen, abstractScreen)
+
+function screenPickerScreen:init()
+    self.rows = {}
+    if self.name == "computer" then
+        table.insert(self.rows, {name = "screens manager",class = screensManagerScreen})
+    end
+    table.insert(self.rows, {name = "flight gizmo",class = flightGizmoScreen})
+    if #self.rows == 1 then
+        monitorUtil.newScreen(self.name, self.rows[1].class)
+        return
+    end
+end
+
+function screenPickerScreen:refresh()
+    self.monitor.setTextColor(colors.white)
+    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    self.monitor.write("Choose screen:")
+    if #self.rows <= 0 then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.write("no screen available!")
+    else
+        for i, row in ipairs(self.rows) do
+            self.monitor.setCursorPos(1, i+1)
+            self.monitor.write(("%2i."):format(i))
+            if i%2==0 then
+                self.monitor.setBackgroundColor(colors.lightGray)
+            else
+                self.monitor.setBackgroundColor(colors.gray)
+            end
+            self.monitor.write(row.name)
+            self.monitor.setBackgroundColor(colors.lightBlue)
+        end
+    end
+end
+
+function screenPickerScreen:onTouch(x, y)
+    local row = self.rows[y-1]
+    if row then
+        monitorUtil.newScreen(self.name, row.class)
+    end
+end
+
+-- loadingScreen
+-- 加载屏幕
+local loadingScreen = {
+    screenTitle = "loading"
+}
+loadingScreen.__index = setmetatable(loadingScreen, abstractScreen)
+
+
+function loadingScreen:report()
+    return "Loading: "..("%i"):format(math.floor(self.step*100/16)).."%", colors.orange
+end
+
+function loadingScreen:init()
+    self.step = 1
+    self.index = 1
+    self.postload = screenPickerScreen
+    if self.monitor.setTextScale then -- 电脑终端也是显示器
+        self.monitor.setTextScale(0.5)
+    end
+end
+
+function loadingScreen:refresh()
+    if self.step == 1 then
+        local offset_x, offset_y = self.monitor.getSize()
+        offset_x = math.floor((offset_x - 15) / 2)
+        offset_y = math.floor((offset_y - 10) / 2)
+        self.monitor.setBackgroundColor(colors.black)
+        self.monitor.clear()
+        self.monitor.setCursorBlink(false)
+        self.monitor.setCursorPos(offset_x + 5, offset_y + 3)
+        self.monitor.blit("WELCOME", "0000000", "fffffff")
+
+        self.monitor.setCursorPos(offset_x + 9 - #properties.userName / 2, offset_y + 5)
+        self.monitor.write(properties.userName)
+
+        self.monitor.setCursorPos(offset_x + 9 - #self.name/ 2 - 1, offset_y + 9)
+        self.monitor.write("["..self.name.."]")
+
+        self.monitor.setCursorPos(offset_x + 1, offset_y + 7)
+    end
+    if self.index >= 14 then self.index = 1 end
+    if self.index < 10 then
+        self.monitor.blit("-", ("%d"):format(self.index), "f")
+    else
+        self.monitor.blit("-", ("%s"):format(string.char(self.index + 87)), "f")
+    end
+    self.step = self.step + 1
+    self.index = self.index + 1
+    if self.step >= 16 then
+        monitorUtil.newScreen(self.name, self.postload)
+    end
 end
 
 ---------monitorUtil---------
@@ -1262,41 +1468,71 @@ monitorUtil = {
     playerList = {}
 }
 
-monitorUtil.newScreen = function (name)
+monitorUtil.newScreen = function (name, class)
     local screen = {}
-    local class
-    if name == "term" then
-        class = flightControlScreen
-    else
-        class = flightControlScreen
+    monitorUtil.screens[name] = screen
+    if not class then
+        class = loadingScreen
     end
     setmetatable(screen, class)
     screen.__index = class
     screen.name = name
     local monitor
-    if name == "term" then
-        monitor = term
+    if name == "computer" then
+        monitor = term.current()
     else
         monitor = peripheral.wrap(name)
     end
     screen.monitor = monitor
     screen:init()
-    return screen
+    return monitorUtil.screens[name] --init有可能会改变屏幕类
+end
+
+monitorUtil.disconnectComputer = function ()
+    local c = term.current()
+    c.setTextColor(colors.white)
+    c.setBackgroundColor(colors.black)
+    c.clear()
+    c.setCursorPos(1, 1)
+    c.write("[DISCONNECTED]")
+    c.setCursorPos(1, 2)
+    c.write("Press any key to reconnect this screen...")
+    c.setCursorPos(1, 3)
+end
+
+monitorUtil.disconnect = function (name)
+    if monitorUtil.screens[name] ~= nil and (name == "computer" or peripheral.isPresent(name)) then
+        monitorUtil.screens[name]:onDisconnect()
+        monitorUtil.screens[name] = nil
+        if name == "computer" then
+            monitorUtil.disconnectComputer()
+        end
+    end
+end
+
+monitorUtil.hasMonitor = function (name)
+    if name == "computer" then
+        return term.current().isColor()
+    elseif peripheral.isPresent(name) and peripheral.hasType(name, "monitor") and peripheral.call(name, "isColor") then
+        return true
+    else
+        return false
+    end
 end
 
 monitorUtil.scanMonitors = function ()
-    local monitors = peripheral.getNames()
-    table.insert(monitors, "term")
-    for _, name in ipairs(monitors) do
+    for _, name in ipairs(properties.enabledMonitors) do
         if monitorUtil.screens[name] == nil then
-            if name == "term" or peripheral.getType(name) == "monitor" then
-                monitorUtil.screens[name] = monitorUtil.newScreen(name)
+            if name == "computer" or monitorUtil.hasMonitor(name) then
+                monitorUtil.newScreen(name)
             end
         end
     end
-    for name, _ in pairs(monitorUtil.screens) do
-        if not tableHasValue(monitors, name) then
+    for _, name in ipairs(properties.enabledMonitors) do
+        if not monitorUtil.hasMonitor(name) then
             monitorUtil.screens[name] = nil
+        elseif name ~= "computer" and not tableHasValue(properties.enabledMonitors, name) then
+            monitorUtil.disconnect(name)
         end
     end
 end
@@ -1308,11 +1544,56 @@ monitorUtil.refresh = function ()
     end
 end
 
+monitorUtil.getMonitorNames = function ()
+    local monitors = peripheral.getNames()
+    local result = {}
+    table.insert(monitors, "term")
+    for _, name in ipairs(monitors) do
+        if monitorUtil.hasMonitor(name) then
+            table.insert(result, name)
+        end
+    end
+    return result
+end
+
+monitorUtil.blankAllScreens = function ()
+    for _, screen in pairs(monitorUtil.screens) do
+        screen:onBlank()
+    end
+end
+
+monitorUtil.onRootFatal = function ()
+    for _, screen in pairs(monitorUtil.screens) do
+        screen:onRootFatal()
+    end
+end
+
+monitorUtil.monitorSortOrder = {
+    computer = -8,
+    bottom = -7,
+    top = -6,
+    left = -5,
+    right = -4,
+    front = -3,
+    back = -2,
+}
+
+function monitorUtil.getMonitorSort(name)
+    if monitorUtil.monitorSortOrder[name] then
+        return monitorUtil.monitorSortOrder[name]
+    end
+    local id = string.match(name, 'monitor_(%d+)')
+    if id then
+        return tonumber(id) or -1
+    end
+    return -1
+end
+
 ---------main---------
 system.init()
 
 --[[if term.isColor() then
-    shell.run("fg","shell")
+    shell.run("bg","shell")
 end]]
 
 function flightUpdate()
@@ -1345,8 +1626,11 @@ function listener()
 
         if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
             monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
-        elseif event == "mouse_click" and monitorUtil.screens["term"] then
-            monitorUtil.screens["term"]:onTouch(eventData[3], eventData[4])
+        elseif event == "mouse_click" and monitorUtil.screens["computer"] then
+            monitorUtil.screens["computer"]:onTouch(eventData[3], eventData[4])
+        elseif event == "key" and not tableHasValue(properties.enabledMonitors, "computer") then
+            table.insert(properties.enabledMonitors, "computer")
+            system.updatePersistentData()
         end
     end
 end
@@ -1367,13 +1651,14 @@ end
 
 local _, err = pcall(function()
     monitorUtil.scanMonitors()
+    if monitorUtil.screens["computer"] == nil then
+        monitorUtil.disconnectComputer()
+    end
     parallel.waitForAll(run, listener)
 end)
 
 if err then
-    for _, screen in pairs(monitorUtil.screens) do
-        screen:onRootFatal()
-    end
+    monitorUtil.onRootFatal()
     if not err:find("Terminated") then
         error(err)
     end
