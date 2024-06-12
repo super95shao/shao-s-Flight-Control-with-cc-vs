@@ -285,6 +285,7 @@ end
 -----------scanner-----------
 scanner = {
     commander = {},
+    playerList = {},
     entities = {},
     vsShips = {},
     MONSTER = {
@@ -353,6 +354,20 @@ scanner.getRCAngle = function(range)
     targetAngle.pitch = -math.deg(math.asin(pos.y / targetAngle.distance))
     targetAngle.roll = 0
     return targetAngle
+end
+
+scanner.scanPlayer = function ()
+    if scanner.entities ~= nil then
+        scanner.playerList = {}
+        for k, v in pairs(scanner.entities) do
+            if v.isPlayer then
+                v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 +
+                    (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
+                table.insert(scanner.playerList, 1, v)
+            end
+        end
+        table.sort(scanner.playerList, function(a, b) return a.distance < b.distance end)
+    end
 end
 
 ---------timeUtil---------
@@ -444,56 +459,62 @@ end
 ---------joyUtil---------
 joyUtil = {
     joy = peripheral.find("tweaked_controller"),
-    switchCd = 0,
     l_fb = 0,
     l_lr = 0,
     r_fb = 0,
     r_lr = 0,
-    LB = false,
-    RB = false,
+    LB = 0,
+    RB = 0,
     LT = 0,
     RT = 0,
-    back = false,
-    start = false
+    back = 0,
+    start = 0,
+    flag = false
 }
 
 joyUtil.getJoyInput = function()
-    if joyUtil.joy.hasUser() then
-        joyUtil.l_lr = -joyUtil.joy.getAxis(1)
-        joyUtil.l_fb = -joyUtil.joy.getAxis(2)
-        joyUtil.r_lr = -joyUtil.joy.getAxis(3)
-        joyUtil.r_fb = -joyUtil.joy.getAxis(4)
-        joyUtil.LB = joyUtil.joy.getButton(5)
-        joyUtil.RB = joyUtil.joy.getButton(6)
-        joyUtil.LT = joyUtil.joy.getAxis(5)
-        joyUtil.RT = joyUtil.joy.getAxis(6)
-        joyUtil.back = joyUtil.joy.getButton(7)
-        joyUtil.start = joyUtil.joy.getButton(8)
-    else
-        joyUtil.l_lr = 0
-        joyUtil.l_fb = 0
-        joyUtil.r_lr = 0
-        joyUtil.r_fb = 0
-        joyUtil.LB = false
-        joyUtil.RB = false
-        joyUtil.LT = 0
-        joyUtil.RT = 0
-        joyUtil.back = false
-        joyUtil.start = false
-    end
-
-    if joyUtil.switchCd > 0 then
-        joyUtil.switchCd = joyUtil.switchCd - 1
-    end
-
-    if joyUtil.switchCd == 0 then
-        if joyUtil.back then
-            properties.quadAutoHover = not properties.quadAutoHover
+    joyUtil.joy = peripheral.find("tweaked_controller")
+    if joyUtil.joy then
+        joyUtil.flag = pcall(joyUtil.joy.hasUser)
+        if not joyUtil.flag then
+            return
         end
-        joyUtil.switchCd = 4
+        if joyUtil.joy.hasUser() then
+            joyUtil.l_lr = -joyUtil.joy.getAxis(1)
+            joyUtil.l_fb = -joyUtil.joy.getAxis(2)
+            joyUtil.r_lr = -joyUtil.joy.getAxis(3)
+            joyUtil.r_fb = -joyUtil.joy.getAxis(4)
+            joyUtil.LB = joyUtil.joy.getButton(5)
+            joyUtil.RB = joyUtil.joy.getButton(6)
+            joyUtil.LT = joyUtil.joy.getAxis(5)
+            joyUtil.RT = joyUtil.joy.getAxis(6)
+            joyUtil.back = joyUtil.joy.getButton(7)
+            joyUtil.start = joyUtil.joy.getButton(8)
+        else
+            joyUtil.l_lr = 0
+            joyUtil.l_fb = 0
+            joyUtil.r_lr = 0
+            joyUtil.r_fb = 0
+            joyUtil.LB = 0
+            joyUtil.RB = 0
+            joyUtil.LT = 0
+            joyUtil.RT = 0
+            joyUtil.back = 0
+            joyUtil.start = 0
+        end
+
+        joyUtil.LB = joyUtil.LB and 1 or 0
+        joyUtil.RB = joyUtil.RB and 1 or 0
+    else
+        properties.mode = modelist.spaceShip.name
+        for k, v in pairs(modelist) do
+            if v == modelist.spaceShip then
+                v.flag = true
+            else
+                v.flag = false
+            end
+        end
     end
-    joyUtil.LB = joyUtil.LB and 1 or 0
-    joyUtil.RB = joyUtil.RB and 1 or 0
 end
 
 ---------PDcontrol---------
@@ -757,8 +778,10 @@ end
 
 local lastAtt = { roll = 0, yaw = 0, pitch = 0 }
 pdControl.followMouse = function()
-    if joyUtil.joy.hasUser() then
-        lastAtt = scanner.getRCAngle(16)
+    if joyUtil.flag then
+        if joyUtil.joy.hasUser() then
+            lastAtt = scanner.getRCAngle(16)
+        end
     end
     pdControl.rotate2Euler(lastAtt)
 
@@ -824,8 +847,7 @@ monitorUtil = {
     attPage = {
         compass = { name = "compass", flag = true },
         level = { name = "level", flag = false }
-    },
-    playerList = {}
+    }
 }
 
 monitorUtil.init = function()
@@ -968,8 +990,8 @@ monitorUtil.refresh = function()
             monitorUtil.monitor.blit("selectUser:", "fffffffffff", "33333333333")
 
             for i = 1, 5, 1 do
-                if monitorUtil.playerList[i] then
-                    local name = monitorUtil.playerList[i].name
+                if scanner.playerList[i] then
+                    local name = scanner.playerList[i].name
                     monitorUtil.monitor.setCursorPos(2, 3 + i)
                     if name == properties.userName then
                         for j = 1, 10, 1 do
@@ -1067,8 +1089,10 @@ monitorUtil.listener = function()
             if monitorUtil.settingPage.PD_Tuning.flag then
                 properties.mode = modelist.spaceShip.name
                 for k, v in pairs(modelist) do
-                    if v.name == modelist.spaceShip.name then v.flag = true
-                    else v.flag = false
+                    if v.name == modelist.spaceShip.name then
+                        v.flag = true
+                    else
+                        v.flag = false
                     end
                 end
                 if y == 2 and x < 3 then
@@ -1126,7 +1150,7 @@ monitorUtil.listener = function()
                 end
 
                 if y >= 4 and y <= 8 then
-                    local user = monitorUtil.playerList[y - 3]
+                    local user = scanner.playerList[y - 3]
                     if user then
                         properties.userName = user.name
                     end
@@ -1171,17 +1195,7 @@ monitorUtil.listener = function()
                         if value.selected then
                             value.flag = true
                             if value == monitorUtil.settingPage.User_Change then
-                                if scanner.entities ~= nil then
-                                    monitorUtil.playerList = {}
-                                    for k, v in pairs(scanner.entities) do
-                                        if v.isPlayer then
-                                            v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 +
-                                                (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
-                                            table.insert(monitorUtil.playerList, 1, v)
-                                        end
-                                    end
-                                    table.sort(monitorUtil.playerList, function(a, b) return a.distance < b.distance end)
-                                end
+                                scanner.scanPlayer()
                             end
                         else
                             value.selected = true
@@ -1217,6 +1231,20 @@ function run()
         joyUtil.getJoyInput()
         scanner.entities = scanner.scanEntity()
         scanner.commander = scanner.getCommander()
+        if not scanner.commander then
+            for k, v in pairs(monitorUtil.mainPage) do
+                if v == monitorUtil.mainPage.settings then
+                    scanner.scanPlayer()
+                    v.flag = true
+                else
+                    v.flag = false
+                end
+            end
+            for k, v in pairs(monitorUtil.settingPage) do
+                if v == monitorUtil.settingPage.User_Change then v.flag = true
+                else v.flag = false end
+            end
+        end
         if toMonitor then
             monitorUtil.refresh()
         end
