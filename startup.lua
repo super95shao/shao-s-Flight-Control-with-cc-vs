@@ -19,6 +19,7 @@ system = {
 }
 
 system.init = function()
+    ship.setScale(1)
     system.file = io.open(system.fileName, "r")
     if system.file then
         properties = textutils.unserialise(system.file:read("a"))
@@ -50,11 +51,11 @@ system.reset = function()
         quad_Acc = 1,           --四轴FPV模式油门强度
         move_D = 1.6,           --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
         ZeroPoint = 0,
-        MAX_MOVE_SPEED = 30,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
+        MAX_MOVE_SPEED = 99,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
         pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
         quadAutoHover = false,
-        spaceShipHov = true,
+        spaceShipLock = false,
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
@@ -374,13 +375,19 @@ attUtil = {
     preEuler = {},
     initPoint = {},
     velocity = {},
-    speed = {}
+    speed = {},
+    lastPos = {},
+    lastEuler = {}
 }
 
 attUtil.getAtt = function()
     attUtil.mass = ship.getMass()
+    attUtil.MomentOfInertiaTensor = ship.getMomentOfInertiaTensor()[1][1]
+
+    attUtil.mass = attUtil.mass * ship.getScale().x ^ 3
+    attUtil.MomentOfInertiaTensor = attUtil.MomentOfInertiaTensor * ship.getScale().x ^ 3
+
     attUtil.size = ship.getSize()
-    attUtil.MomentOfInertiaTensor = ship.getMomentOfInertiaTensor()
     attUtil.position = ship.getWorldspacePosition()
     attUtil.quat = ship.getQuaternion()
     attUtil.conjQuat = {}
@@ -518,14 +525,10 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
     d = d * 200
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    if properties.spaceShipHov then
-        pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
-    else
-        pdControl.ySpeed = yVal * p + attUtil.speed / 4 + -attUtil.velocity.y * d
-    end
+    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed * 2 + -attUtil.velocity.y * d
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
-        pdControl.ySpeed * attUtil.mass,
+        pdControl.ySpeed * attUtil.mass + properties.quadGravity * 30 * attUtil.mass,
         pdControl.zSpeed * attUtil.mass)
 
     ship.applyRotDependentForce(xVal * p * attUtil.mass,
@@ -560,9 +563,9 @@ pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
     ship.applyRotDependentTorque(
-        pdControl.rollSpeed * attUtil.MomentOfInertiaTensor[1][1],
-        pdControl.yawSpeed * attUtil.MomentOfInertiaTensor[1][1],
-        pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor[1][1])
+        pdControl.rollSpeed * attUtil.MomentOfInertiaTensor,
+        pdControl.yawSpeed * attUtil.MomentOfInertiaTensor,
+        pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor)
 end
 
 pdControl.rotate2Euler = function(euler)
@@ -608,12 +611,19 @@ pdControl.rotate2Euler2 = function(euler)
 end
 
 pdControl.spaceShip = function()
-    pdControl.moveWithRot(
-        math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
-        math.deg(math.asin(joyUtil.l_fb)),
-        math.deg(math.asin(joyUtil.LB - joyUtil.RB)),
-        properties.space_Acc,
-        properties.move_D)
+    if properties.spaceShipLock then
+        if next(attUtil.lastEuler) == nil then attUtil.lastEuler = attUtil.eulerAngle end
+        if next(attUtil.lastPos) == nil then attUtil.lastPos = attUtil.position end
+        pdControl.gotoPosition(attUtil.lastEuler, attUtil.lastPos)
+    else
+        pdControl.moveWithRot(
+            math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
+            math.deg(math.asin(joyUtil.l_fb)),
+            math.deg(math.asin(joyUtil.LB - joyUtil.RB)),
+            properties.space_Acc,
+            properties.move_D)
+    end
+
     pdControl.rotInner(
         math.deg(math.asin(joyUtil.r_lr)),
         math.deg(math.asin(joyUtil.l_lr)),
@@ -680,7 +690,7 @@ pdControl.quadFPV = function()
     end
 end
 
-pdControl.helicopter = function ()
+pdControl.helicopter = function()
     if joyUtil.l_fb == 0 then
         pdControl.quadUp(
             0,
@@ -809,7 +819,8 @@ monitorUtil = {
         PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
         User_Change = { y = 4, name = "User_Change", selected = false, flag = false },
         HOME_SET    = { y = 5, name = "Home_Set   ", selected = false, flag = false },
-        Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false }
+        Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false },
+        miniSize    = { y = 7, name = "*miniSize* ", selected = false, flag = false }
     },
     attPage = {
         compass = { name = "compass", flag = true },
@@ -871,13 +882,16 @@ monitorUtil.refresh = function()
         end
 
         if properties.mode == modelist.spaceShip.name then
-            monitorUtil.monitor.setCursorPos(12, 3)
-            if properties.spaceShipHov then
-                
+            monitorUtil.monitor.setCursorPos(12, modelist.spaceShip.y)
+            if properties.spaceShipLock then
+                monitorUtil.monitor.blit(" L", "ff", "33")
+            else
+                monitorUtil.monitor.blit(" N", "88", "33")
             end
         end
+
         if properties.mode == modelist.quadFPV.name then
-            monitorUtil.monitor.setCursorPos(12, 4)
+            monitorUtil.monitor.setCursorPos(12, modelist.quadFPV.y)
             if properties.quadAutoHover then
                 monitorUtil.monitor.blit(" A", "ff", "33")
             else
@@ -912,12 +926,14 @@ monitorUtil.refresh = function()
         elseif monitorUtil.attPage.level.flag then --水平仪
             for i = 1, 128, 1 do
                 local yPoint = math.abs(attUtil.eulerAngle.roll) > 90 and -attUtil.pZ.y or attUtil.pZ.y
-                monitorUtil.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i), 6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
+                monitorUtil.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i),
+                    6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
                 monitorUtil.monitor.blit(" ", "0", "0")
             end
         end
     elseif monitorUtil.mainPage.settings.flag then --settingPage
         if monitorUtil.settingPage.PD_Tuning.flag then
+            properties.spaceShipLock = false
             monitorUtil.monitor.setCursorPos(1, 2)
             monitorUtil.monitor.blit("<<", "24", "33")
 
@@ -1040,13 +1056,22 @@ monitorUtil.listener = function()
                     end
                 end
             else
-                if y == 4 then
+                if y == modelist.spaceShip.y then
+                    attUtil.lastPos = attUtil.position
+                    attUtil.lastEuler = attUtil.eulerAngle
+                    properties.spaceShipLock = not properties.spaceShipLock
+                elseif y == modelist.quadFPV.y then
                     properties.quadAutoHover = not properties.quadAutoHover
                 end
             end
         elseif monitorUtil.mainPage.settings.flag then
             if monitorUtil.settingPage.PD_Tuning.flag then
                 properties.mode = modelist.spaceShip.name
+                for k, v in pairs(modelist) do
+                    if v.name == modelist.spaceShip.name then v.flag = true
+                    else v.flag = false
+                    end
+                end
                 if y == 2 and x < 3 then
                     monitorUtil.settingPage.PD_Tuning.flag = false
                     system.update(system.fileName, properties)
@@ -1141,6 +1166,8 @@ monitorUtil.listener = function()
                         end
                     end
                 end
+            elseif monitorUtil.settingPage.miniSize.flag then
+                ship.setScale(0.1)
             else
                 for key, value in pairs(monitorUtil.settingPage) do
                     if y == value.y then
@@ -1197,7 +1224,8 @@ function run()
             monitorUtil.refresh()
         end
 
-        if properties.mode == modelist.spaceShip.name then
+        if ship.isStatic() then
+        elseif properties.mode == modelist.spaceShip.name then
             pdControl.spaceShip()
         elseif properties.mode == modelist.quadFPV.name then
             pdControl.quadFPV()
