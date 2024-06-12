@@ -8,8 +8,6 @@ local modelist = {
     pointLoop = { y = 8, name = "pointLoop ", flag = false }
 }
 
-local toMonitor = peripheral.find("monitor")
-
 local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil
 
 ---------system---------
@@ -54,7 +52,6 @@ system.reset = function()
         pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
         quadAutoHover = false,
-        spaceShipHov = true,
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
@@ -71,6 +68,15 @@ system.update = function(file, obj)
 end
 
 -----------function------------
+function tableHasValue (targetTable, targetValue)
+    for index, value in ipairs(targetTable) do
+        if index ~= 'metatable' and value == targetValue then
+            return true
+        end
+    end
+    return false
+end
+
 function copysign(num1, num2)
     num1 = math.abs(num1)
     num1 = num2 > 0 and num1 or -num1
@@ -311,6 +317,9 @@ scanner.scanShip = function()
 end
 
 scanner.scanEntity = function()
+    if not coordinate then
+        return {}
+    end
     return coordinate.getEntities(-1)
 end
 
@@ -372,9 +381,9 @@ attUtil = {
     omega = {},
     eulerAngle = {},
     preEuler = {},
+    eulerOmega = {},
     initPoint = {},
-    velocity = {},
-    speed = {}
+    velocity = {}
 }
 
 attUtil.getAtt = function()
@@ -407,10 +416,14 @@ attUtil.getAtt = function()
     attUtil.omega.pitch = math.deg(math.asin(XPoint.y))
     attUtil.omega.yaw = math.deg(math.atan2(-XPoint.z, XPoint.x))
 
+
+    attUtil.eulerOmega.roll = attUtil.eulerAngle.roll - attUtil.preEuler.roll
+    attUtil.eulerOmega.yaw = attUtil.eulerAngle.yaw - attUtil.preEuler.yaw
+    attUtil.eulerOmega.pitch = attUtil.eulerAngle.pitch - attUtil.preEuler.pitch
+
     attUtil.velocity.x = ship.getVelocity().x / 20
     attUtil.velocity.y = ship.getVelocity().y / 20
     attUtil.velocity.z = ship.getVelocity().z / 20
-    attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
     --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(attUtil.eulerAngle.roll, attUtil.eulerAngle.yaw, attUtil.eulerAngle.pitch))
     --commands.execAsync(("say w = %0.2f x=%0.2f  y=%0.2f  z=%0.2f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
 end
@@ -518,11 +531,7 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
     d = d * 200
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    if properties.spaceShipHov then
-        pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
-    else
-        pdControl.ySpeed = yVal * p + attUtil.speed / 4 + -attUtil.velocity.y * d
-    end
+    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
@@ -556,6 +565,7 @@ pdControl.quadUp = function(yVal, p, d, hov)
 end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
+    --commands.execAsync(("say omegaRoll=%0.8f"):format(attUtil.omega.roll))
     pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
@@ -797,394 +807,549 @@ pdControl.pointLoop = function()
     pdControl.gotoPosition(
         tgAg, pos)
 end
----------monitorUtil---------
-monitorUtil = {
-    monitor = nil,
-    mainPage = {
-        modeSelect   = { x = 1, name = " MOD ", flag = true },
-        attIndicator = { x = 6, name = " ATT ", flag = false },
-        settings     = { x = 11, name = " SET ", flag = false }
-    },
-    settingPage = {
-        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
-        User_Change = { y = 4, name = "User_Change", selected = false, flag = false },
-        HOME_SET    = { y = 5, name = "Home_Set   ", selected = false, flag = false },
-        Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false }
-    },
-    attPage = {
-        compass = { name = "compass", flag = true },
-        level = { name = "level", flag = false }
-    },
-    playerList = {}
-}
+---------screens---------
 
-monitorUtil.init = function()
-    monitorUtil.monitor = peripheral.find("monitor")
-    monitorUtil.monitor.setTextScale(0.5)
-    term.redirect(monitorUtil.monitor)
-    monitorUtil.monitor.setBackgroundColor(colors.black)
+local abstractScreen = {}
+abstractScreen.__index = abstractScreen
 
-    monitorUtil.monitor.clear()
-    monitorUtil.monitor.setCursorPos(5, 3)
-    monitorUtil.monitor.blit("WELCOME", "0000000", "fffffff")
-
-    monitorUtil.monitor.setCursorPos(9 - #properties.userName / 2, 5)
-    monitorUtil.monitor.write(properties.userName)
-
-    monitorUtil.monitor.setCursorPos(1, 7)
-    local index = 1
-    for i = 1, 15, 1 do
-        if index >= 14 then index = 1 end
-        if index < 10 then
-            monitorUtil.monitor.blit("-", ("%d"):format(index), "f")
-        else
-            monitorUtil.monitor.blit("-", ("%s"):format(string.char(index + 87)), "f")
-        end
-        index = index + 1
-        sleep(0.05)
+function abstractScreen:init() end
+function abstractScreen:refresh() end
+function abstractScreen:onTouch(x, y) end
+function abstractScreen:onDisconnect()
+    self.monitor.setTextColor(colors.white)
+    self.monitor.setBackgroundColor(colors.black)
+    self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    self.monitor.write("[DISCONNECTED]")
+end
+function abstractScreen:onRootFatal()
+    self.monitor.setTextColor(colors.white)
+    self.monitor.setBackgroundColor(colors.blue)
+    self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(1)
+        self.monitor.write(":(")
     end
-
-    monitorUtil.monitor.setBackgroundColor(colors.lightBlue)
-    sleep(0.1)
 end
 
-monitorUtil.refresh = function()
-    monitorUtil.monitor.clear()
+local flightControlScreen = {}
+flightControlScreen.__index = setmetatable(flightControlScreen, abstractScreen)
 
-    for key, value in pairs(monitorUtil.mainPage) do
-        monitorUtil.monitor.setCursorPos(value.x, 1)
+function flightControlScreen:init()
+    if self.monitor.isColor() then -- 在非高级显示器上停用功能
+        if self.monitor.setTextScale then -- 电脑终端也是显示器
+            self.monitor.setTextScale(0.5)
+        end
+        self.monitor.setBackgroundColor(colors.lightBlue)
+        self.loader = {
+            step = 1,
+            index = 1,
+        }
+        self.mainPage = {
+            modeSelect   = { x = 1, name = " MOD ", flag = true },
+            attIndicator = { x = 6, name = " ATT ", flag = false },
+            settings     = { x = 11, name = " SET ", flag = false }
+        }
+        self.settingPage = {
+            Essentials  = { y = 3, name = "Essentials ", selected = false, flag = false },
+            PD_Tuning   = { y = 4, name = "PD_Tuning  ", selected = false, flag = false },
+            User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
+            HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
+            Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false }
+        }
+        self.attPage = {
+            compass = { name = "compass", flag = true },
+            level = { name = "level", flag = false }
+        }
+        self.enabled = true
+    end
+end
+
+function flightControlScreen:doLoader()
+    if self.loader.step >= 16 then
+        self.monitor.setBackgroundColor(colors.lightBlue)
+        self.loader = nil
+        return
+    end
+    if self.loader.step == 1 then
+        self.monitor.setBackgroundColor(colors.black)
+        self.monitor.clear()
+        self.monitor.setCursorPos(5, 3)
+        self.monitor.blit("WELCOME", "0000000", "fffffff")
+
+        self.monitor.setCursorPos(9 - #properties.userName / 2, 5)
+        self.monitor.write(properties.userName)
+
+        self.monitor.setCursorPos(9 - #self.name/ 2 - 1, 9)
+        self.monitor.write("["..self.name.."]")
+
+        self.monitor.setCursorPos(1, 7)
+    end
+    if self.loader.index >= 14 then self.loader.index = 1 end
+    if self.loader.index < 10 then
+        self.monitor.blit("-", ("%d"):format(self.loader.index), "f")
+    else
+        self.monitor.blit("-", ("%s"):format(string.char(self.loader.index + 87)), "f")
+    end
+    self.loader.step = self.loader.step + 1
+    self.loader.index = self.loader.index + 1
+end
+
+function flightControlScreen:refresh()
+    if not self.enabled then return end
+    if self.loader ~= nil then
+        self:doLoader()
+        return
+    end
+    self.monitor.clear()
+
+    for key, value in pairs(self.mainPage) do
+        self.monitor.setCursorPos(value.x, 1)
         if value.flag then
-            monitorUtil.monitor.blit(value.name, "fffff", "44444")
+            self.monitor.blit(value.name, "fffff", "44444")
         else
-            monitorUtil.monitor.blit(value.name, "00000", "22222")
+            self.monitor.blit(value.name, "00000", "22222")
         end
     end
 
-    if monitorUtil.mainPage.modeSelect.flag then --modePage
+    if self.mainPage.modeSelect.flag then --modePage
+        if ship.isStatic() then
+            self.monitor.setCursorPos(4, 2)
+            self.monitor.blit("[STATIC!]", "eeeeeeeee", "111111111")
+        end
         for key, mode in pairs(modelist) do
-            monitorUtil.monitor.setCursorPos(2, mode.y)
+            self.monitor.setCursorPos(2, mode.y)
             if mode.flag then
-                monitorUtil.monitor.blit(mode.name, "ffffffffff", "4444444444")
+                self.monitor.blit(mode.name, "ffffffffff", "4444444444")
             else
-                monitorUtil.monitor.blit(mode.name, "0000000000", "3333333333")
+                self.monitor.blit(mode.name, "0000000000", "3333333333")
             end
         end
 
-        if properties.mode == modelist.spaceShip.name then
-            monitorUtil.monitor.setCursorPos(12, 3)
-            if properties.spaceShipHov then
-                
-            end
-        end
         if properties.mode == modelist.quadFPV.name then
-            monitorUtil.monitor.setCursorPos(12, 4)
+            self.monitor.setCursorPos(12, 4)
             if properties.quadAutoHover then
-                monitorUtil.monitor.blit(" A", "ff", "33")
+                self.monitor.blit(" A", "ff", "33")
             else
-                monitorUtil.monitor.blit(" N", "88", "33")
+                self.monitor.blit(" N", "88", "33")
             end
         end
-    elseif monitorUtil.mainPage.attIndicator.flag then --attPage
-        if monitorUtil.attPage.compass.flag then       --罗盘
-            monitorUtil.monitor.setCursorPos(1, 2)
+    elseif self.mainPage.attIndicator.flag then --attPage
+        if self.attPage.compass.flag then       --罗盘
+            self.monitor.setCursorPos(1, 2)
             for i = 1, 15, 1 do
-                monitorUtil.monitor.setCursorPos(i, 2)
-                monitorUtil.monitor.blit(".", "0", "3")
+                self.monitor.setCursorPos(i, 2)
+                self.monitor.blit(".", "0", "3")
             end
 
             local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
             local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
             if attUtil.pX.x > 0 then
-                monitorUtil.monitor.setCursorPos(8 + zPoint, 2)
-                monitorUtil.monitor.blit("W", "0", "3")
+                self.monitor.setCursorPos(8 + zPoint, 2)
+                self.monitor.blit("W", "0", "3")
             else
-                monitorUtil.monitor.setCursorPos(8 - zPoint, 2)
-                monitorUtil.monitor.blit("E", "0", "3")
+                self.monitor.setCursorPos(8 - zPoint, 2)
+                self.monitor.blit("E", "0", "3")
             end
 
             if attUtil.pX.z > 0 then
-                monitorUtil.monitor.setCursorPos(8 + xPoint, 2)
-                monitorUtil.monitor.blit("N", "e", "3")
+                self.monitor.setCursorPos(8 + xPoint, 2)
+                self.monitor.blit("N", "e", "3")
             else
-                monitorUtil.monitor.setCursorPos(8 - xPoint, 2)
-                monitorUtil.monitor.blit("S", "b", "3")
+                self.monitor.setCursorPos(8 - xPoint, 2)
+                self.monitor.blit("S", "b", "3")
             end
-        elseif monitorUtil.attPage.level.flag then --水平仪
+        elseif self.attPage.level.flag then --水平仪
             for i = 1, 128, 1 do
                 local yPoint = math.abs(attUtil.eulerAngle.roll) > 90 and -attUtil.pZ.y or attUtil.pZ.y
-                monitorUtil.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i), 6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
-                monitorUtil.monitor.blit(" ", "0", "0")
+                self.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i), 6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
+                self.monitor.blit(" ", "0", "0")
             end
         end
-    elseif monitorUtil.mainPage.settings.flag then --settingPage
-        if monitorUtil.settingPage.PD_Tuning.flag then
-            monitorUtil.monitor.setCursorPos(1, 2)
-            monitorUtil.monitor.blit("<<", "24", "33")
+    elseif self.mainPage.settings.flag then --settingPage
+        if self.settingPage.Essentials.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
 
-            monitorUtil.monitor.setCursorPos(2, 3)
-            monitorUtil.monitor.blit("P: --      ++", "1ffffffffffff", "333b53333331e")
-            monitorUtil.monitor.setCursorPos(8, 3)
-            print(string.format("%0.2f", properties.omega_P))
+            self.monitor.setCursorPos(2, 3)
+            self.monitor.blit("W A S D", "fffffff", "e3e3e3e")
+        elseif self.settingPage.PD_Tuning.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
 
-            monitorUtil.monitor.setCursorPos(2, 4)
-            monitorUtil.monitor.blit("D: --      ++", "9ffffffffffff", "333b53333331e")
-            monitorUtil.monitor.setCursorPos(8, 4)
-            print(string.format("%0.2f", properties.omega_D))
+            self.monitor.setCursorPos(2, 3)
+            self.monitor.blit("P: --      ++", "1ffffffffffff", "333b53333331e")
+            self.monitor.setCursorPos(8, 3)
+            self.monitor.write(string.format("%0.2f", properties.omega_P))
 
-            monitorUtil.monitor.setCursorPos(2, 6)
-            monitorUtil.monitor.blit("spaceAcc-   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11, 6)
-            print(string.format("%0.1f", properties.space_Acc))
+            self.monitor.setCursorPos(2, 4)
+            self.monitor.blit("D: --      ++", "9ffffffffffff", "333b53333331e")
+            self.monitor.setCursorPos(8, 4)
+            self.monitor.write(string.format("%0.2f", properties.omega_D))
 
-            monitorUtil.monitor.setCursorPos(2, 7)
-            monitorUtil.monitor.blit("quad_Acc-   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11, 7)
-            print(string.format("%0.1f", properties.quad_Acc))
+            self.monitor.setCursorPos(2, 6)
+            self.monitor.blit("spaceAcc-   +", "fffffffffffff", "33333333b333e")
+            self.monitor.setCursorPos(11, 6)
+            self.monitor.write(string.format("%0.1f", properties.space_Acc))
 
-            monitorUtil.monitor.setCursorPos(2, 8)
-            monitorUtil.monitor.blit("MOVE_D: -   +", "fffffffffffff", "33333333b333e")
-            monitorUtil.monitor.setCursorPos(11, 8)
-            print(string.format("%0.1f", properties.move_D))
-        elseif monitorUtil.settingPage.User_Change.flag then
-            monitorUtil.monitor.setCursorPos(1, 2)
-            monitorUtil.monitor.blit("<<", "24", "33")
+            self.monitor.setCursorPos(2, 7)
+            self.monitor.blit("quad_Acc-   +", "fffffffffffff", "33333333b333e")
+            self.monitor.setCursorPos(11, 7)
+            self.monitor.write(string.format("%0.1f", properties.quad_Acc))
 
-            monitorUtil.monitor.setCursorPos(2, 3)
-            monitorUtil.monitor.blit("selectUser:", "fffffffffff", "33333333333")
+            self.monitor.setCursorPos(2, 8)
+            self.monitor.blit("MOVE_D: -   +", "fffffffffffff", "33333333b333e")
+            self.monitor.setCursorPos(11, 8)
+            self.monitor.write(string.format("%0.1f", properties.move_D))
+        elseif self.settingPage.User_Change.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
+
+            self.monitor.setCursorPos(2, 3)
+            self.monitor.blit("selectUser:", "fffffffffff", "33333333333")
 
             for i = 1, 5, 1 do
                 if monitorUtil.playerList[i] then
                     local name = monitorUtil.playerList[i].name
-                    monitorUtil.monitor.setCursorPos(2, 3 + i)
+                    self.monitor.setCursorPos(2, 3 + i)
                     if name == properties.userName then
                         for j = 1, 10, 1 do
                             local tmpChar = name:sub(j, j)
                             if #tmpChar ~= 0 then
-                                monitorUtil.monitor.blit(tmpChar, "f", "4")
+                                self.monitor.blit(tmpChar, "f", "4")
                             end
                         end
                     else
                         for j = 1, 10, 1 do
                             local tmpChar = name:sub(j, j)
                             if #tmpChar ~= 0 then
-                                monitorUtil.monitor.blit(tmpChar, "0", "3")
+                                self.monitor.blit(tmpChar, "0", "3")
                             end
                         end
                     end
                 end
             end
-        elseif monitorUtil.settingPage.HOME_SET.flag then
-            monitorUtil.monitor.setCursorPos(1, 2)
-            monitorUtil.monitor.blit("<<", "24", "33")
-        elseif monitorUtil.settingPage.Simulate.flag then
-            monitorUtil.monitor.setCursorPos(1, 2)
-            monitorUtil.monitor.blit("<<", "24", "33")
+        elseif self.settingPage.HOME_SET.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
+        elseif self.settingPage.Simulate.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
 
-            monitorUtil.monitor.setCursorPos(2, 4)
-            monitorUtil.monitor.blit("AirMass-    +", "fffffffffffff", "3333333b3333e")
-            monitorUtil.monitor.setCursorPos(10, 4)
-            print(string.format("%0.1f", properties.airMass))
+            self.monitor.setCursorPos(2, 4)
+            self.monitor.blit("AirMass-    +", "fffffffffffff", "3333333b3333e")
+            self.monitor.setCursorPos(10, 4)
+            self.monitor.write(string.format("%0.1f", properties.airMass))
 
-            monitorUtil.monitor.setCursorPos(2, 6)
-            monitorUtil.monitor.blit("Gravity-    +", "fffffffffffff", "3333333b3333e")
-            monitorUtil.monitor.setCursorPos(10, 6)
-            print(string.format("%0.1f", properties.quadGravity))
+            self.monitor.setCursorPos(2, 6)
+            self.monitor.blit("Gravity-    +", "fffffffffffff", "3333333b3333e")
+            self.monitor.setCursorPos(10, 6)
+            self.monitor.write(string.format("%0.1f", properties.quadGravity))
 
-            monitorUtil.monitor.setCursorPos(2, 8)
-            monitorUtil.monitor.blit("0_Point-    +", "fffffffffffff", "3333333b3333e")
-            monitorUtil.monitor.setCursorPos(10, 8)
-            print(string.format("%0.1f", properties.ZeroPoint))
+            self.monitor.setCursorPos(2, 8)
+            self.monitor.blit("0_Point-    +", "fffffffffffff", "3333333b3333e")
+            self.monitor.setCursorPos(10, 8)
+            self.monitor.write(string.format("%0.1f", properties.ZeroPoint))
         else
-            for key, value in pairs(monitorUtil.settingPage) do
-                monitorUtil.monitor.setCursorPos(2, value.y)
+            for key, value in pairs(self.settingPage) do
+                self.monitor.setCursorPos(2, value.y)
                 if value.selected then
-                    monitorUtil.monitor.blit(value.name, "fffffffffff", "44444444444")
+                    self.monitor.blit(value.name, "fffffffffff", "44444444444")
                 else
-                    monitorUtil.monitor.blit(value.name, "00000000000", "33333333333")
+                    self.monitor.blit(value.name, "00000000000", "33333333333")
                 end
             end
         end
     end
 
     --reboot and shutdown
-    monitorUtil.monitor.setCursorPos(1, 10)
-    monitorUtil.monitor.blit("[|]", "eee", "333")
-    monitorUtil.monitor.setCursorPos(13, 10)
-    monitorUtil.monitor.blit("[R]", "444", "333")
+    self.monitor.setCursorPos(1, 10)
+    self.monitor.blit("[|]", "eee", "333")
+    self.monitor.setCursorPos(13, 10)
+    self.monitor.blit("[R]", "444", "333")
 end
 
-monitorUtil.listener = function()
-    while true do
-        local event, side, x, y = os.pullEvent("monitor_touch")
-
-        if y < 2 then
-            for key, value in pairs(monitorUtil.mainPage) do
-                if x >= value.x and x <= value.x + 4 then
-                    value.flag = true
-                else
-                    value.flag = false
-                end
+function flightControlScreen:onTouch(x, y)
+    if not self.enabled then return end
+    if self.loader ~= nil then return end
+    if y < 2 then
+        for key, value in pairs(self.mainPage) do
+            if x >= value.x and x <= value.x + 4 then
+                value.flag = true
+            else
+                value.flag = false
             end
         end
+    end
 
-        if monitorUtil.mainPage.modeSelect.flag then
-            if x < 12 then
-                if y >= 3 and y <= 8 then
-                    for key, value in pairs(modelist) do
-                        if value.y == y then
-                            value.flag = true
-                            properties.mode = value.name
-                        else
-                            value.flag = false
-                        end
-                    end
-                end
-            else
-                if y == 4 then
-                    properties.quadAutoHover = not properties.quadAutoHover
-                end
-            end
-        elseif monitorUtil.mainPage.settings.flag then
-            if monitorUtil.settingPage.PD_Tuning.flag then
-                properties.mode = modelist.spaceShip.name
-                if y == 2 and x < 3 then
-                    monitorUtil.settingPage.PD_Tuning.flag = false
-                    system.update(system.fileName, properties)
-                end
-
-                if y == 3 then
-                    if x == 5 then
-                        properties.omega_P = properties.omega_P - 0.1
-                    elseif x == 6 then
-                        properties.omega_P = properties.omega_P - 0.01
-                    elseif x == 13 then
-                        properties.omega_P = properties.omega_P + 0.01
-                    elseif x == 14 then
-                        properties.omega_P = properties.omega_P + 0.1
-                    end
-                elseif y == 4 then
-                    if x == 5 then
-                        properties.omega_D = properties.omega_D - 0.1
-                    elseif x == 6 then
-                        properties.omega_D = properties.omega_D - 0.01
-                    elseif x == 13 then
-                        properties.omega_D = properties.omega_D + 0.01
-                    elseif x == 14 then
-                        properties.omega_D = properties.omega_D + 0.1
-                    end
-
-                    if properties.omega_D >= 1.52 then properties.omega_D = 1.52 end
-                elseif y == 6 then
-                    if x == 10 then
-                        properties.space_Acc = properties.space_Acc - 0.1
-                    elseif x == 14 then
-                        properties.space_Acc = properties.space_Acc + 0.1
-                    end
-                elseif y == 7 then
-                    if x == 10 then
-                        properties.quad_Acc = properties.quad_Acc - 0.1
-                    elseif x == 14 then
-                        properties.quad_Acc = properties.quad_Acc + 0.1
-                    end
-                elseif y == 8 then
-                    if x == 10 then
-                        properties.move_D = properties.move_D - 0.1
-                    elseif x == 14 then
-                        if properties.move_D < 1.6 then
-                            properties.move_D = properties.move_D + 0.1
-                        end
-                    end
-                end
-            elseif monitorUtil.settingPage.User_Change.flag then
-                if y == 2 and x < 3 then
-                    monitorUtil.settingPage.User_Change.flag = false
-                    system.update(system.fileName, properties)
-                end
-
-                if y >= 4 and y <= 8 then
-                    local user = monitorUtil.playerList[y - 3]
-                    if user then
-                        properties.userName = user.name
-                    end
-                end
-            elseif monitorUtil.settingPage.HOME_SET.flag then
-                if y == 2 and x < 3 then
-                    monitorUtil.settingPage.HOME_SET.flag = false
-                    system.update(system.fileName, properties)
-                end
-            elseif monitorUtil.settingPage.Simulate.flag then
-                if y == 2 and x < 3 then
-                    monitorUtil.settingPage.Simulate.flag = false
-                    system.update(system.fileName, properties)
-                end
-
-                if y == 4 then
-                    if x == 9 then
-                        properties.airMass = properties.airMass - 0.1
-                    elseif x == 14 then
-                        properties.airMass = properties.airMass + 0.1
-                    end
-                elseif y == 6 then
-                    if x == 9 then
-                        properties.quadGravity = properties.quadGravity - 0.1
-                    elseif x == 14 then
-                        properties.quadGravity = properties.quadGravity + 0.1
-                    end
-                elseif y == 8 then
-                    if x == 9 then
-                        if properties.ZeroPoint > -1 then
-                            properties.ZeroPoint = properties.ZeroPoint - 0.1
-                        end
-                    elseif x == 14 then
-                        if properties.ZeroPoint < 0 then
-                            properties.ZeroPoint = properties.ZeroPoint + 0.1
-                        end
-                    end
-                end
-            else
-                for key, value in pairs(monitorUtil.settingPage) do
-                    if y == value.y then
-                        if value.selected then
-                            value.flag = true
-                            if value == monitorUtil.settingPage.User_Change then
-                                if scanner.entities ~= nil then
-                                    monitorUtil.playerList = {}
-                                    for k, v in pairs(scanner.entities) do
-                                        if v.isPlayer then
-                                            v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 +
-                                                (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
-                                            table.insert(monitorUtil.playerList, 1, v)
-                                        end
-                                    end
-                                    table.sort(monitorUtil.playerList, function(a, b) return a.distance < b.distance end)
-                                end
-                            end
-                        else
-                            value.selected = true
-                        end
+    if self.mainPage.modeSelect.flag then
+        if x < 12 then
+            if y >= 3 and y <= 8 then
+                for key, value in pairs(modelist) do
+                    if value.y == y then
+                        value.flag = true
+                        properties.mode = value.name
                     else
-                        value.selected = false
                         value.flag = false
                     end
                 end
             end
-        end
-
-        if y == 10 and (x >= 13 or x < 4) then
-            monitorUtil.monitor.setBackgroundColor(colors.black)
-            monitorUtil.monitor.clear()
-            system.update(system.fileName, properties)
-            if x >= 13 then
-                os.reboot()
-            elseif x < 4 then
-                os.shutdown()
+        else
+            if y == 4 then
+                properties.quadAutoHover = not properties.quadAutoHover
             end
         end
+    elseif self.mainPage.settings.flag then
+        if self.settingPage.Essentials.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.Essentials.flag = false
+                system.update(system.fileName, properties)
+            end
+        elseif self.settingPage.PD_Tuning.flag then
+            properties.mode = modelist.spaceShip.name
+            if y == 2 and x < 3 then
+                self.settingPage.PD_Tuning.flag = false
+                system.update(system.fileName, properties)
+            end
+
+            if y == 3 then
+                if x == 5 then
+                    properties.omega_P = properties.omega_P - 0.1
+                elseif x == 6 then
+                    properties.omega_P = properties.omega_P - 0.01
+                elseif x == 13 then
+                    properties.omega_P = properties.omega_P + 0.01
+                elseif x == 14 then
+                    properties.omega_P = properties.omega_P + 0.1
+                end
+            elseif y == 4 then
+                if x == 5 then
+                    properties.omega_D = properties.omega_D - 0.1
+                elseif x == 6 then
+                    properties.omega_D = properties.omega_D - 0.01
+                elseif x == 13 then
+                    properties.omega_D = properties.omega_D + 0.01
+                elseif x == 14 then
+                    properties.omega_D = properties.omega_D + 0.1
+                end
+
+                if properties.omega_D >= 1.52 then properties.omega_D = 1.52 end
+            elseif y == 6 then
+                if x == 10 then
+                    properties.space_Acc = properties.space_Acc - 0.1
+                elseif x == 14 then
+                    properties.space_Acc = properties.space_Acc + 0.1
+                end
+            elseif y == 7 then
+                if x == 10 then
+                    properties.quad_Acc = properties.quad_Acc - 0.1
+                elseif x == 14 then
+                    properties.quad_Acc = properties.quad_Acc + 0.1
+                end
+            elseif y == 8 then
+                if x == 10 then
+                    properties.move_D = properties.move_D - 0.1
+                elseif x == 14 then
+                    if properties.move_D < 1.6 then
+                        properties.move_D = properties.move_D + 0.1
+                    end
+                end
+            end
+        elseif self.settingPage.User_Change.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.User_Change.flag = false
+                system.update(system.fileName, properties)
+            end
+
+            if y >= 4 and y <= 8 then
+                local user = monitorUtil.playerList[y - 3]
+                if user then
+                    properties.userName = user.name
+                end
+            end
+        elseif self.settingPage.HOME_SET.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.HOME_SET.flag = false
+                system.update(system.fileName, properties)
+            end
+        elseif self.settingPage.Simulate.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.Simulate.flag = false
+                system.update(system.fileName, properties)
+            end
+
+            if y == 4 then
+                if x == 9 then
+                    properties.airMass = properties.airMass - 0.1
+                elseif x == 14 then
+                    properties.airMass = properties.airMass + 0.1
+                end
+            elseif y == 6 then
+                if x == 9 then
+                    properties.quadGravity = properties.quadGravity - 0.1
+                elseif x == 14 then
+                    properties.quadGravity = properties.quadGravity + 0.1
+                end
+            elseif y == 8 then
+                if x == 9 then
+                    if properties.ZeroPoint > -1 then
+                        properties.ZeroPoint = properties.ZeroPoint - 0.1
+                    end
+                elseif x == 14 then
+                    if properties.ZeroPoint < 0 then
+                        properties.ZeroPoint = properties.ZeroPoint + 0.1
+                    end
+                end
+            end
+        else
+            for key, value in pairs(self.settingPage) do
+                if y == value.y then
+                    if value.selected then
+                        value.flag = true
+                        if value == self.settingPage.User_Change then
+                            if scanner.entities ~= nil then
+                                monitorUtil.playerList = {}
+                                for k, v in pairs(scanner.entities) do
+                                    if v.isPlayer then
+                                        v.distance = math.sqrt((attUtil.position.x - v.x) ^ 2 +
+                                            (attUtil.position.y - v.y) ^ 2 + (attUtil.position.z - v.z) ^ 2)
+                                        table.insert(monitorUtil.playerList, 1, v)
+                                    end
+                                end
+                                table.sort(monitorUtil.playerList, function(a, b) return a.distance < b.distance end)
+                            end
+                        end
+                    else
+                        value.selected = true
+                    end
+                else
+                    value.selected = false
+                    value.flag = false
+                end
+            end
+        end
+    end
+
+    if y == 10 and (x >= 13 or x < 4) then
+        self.monitor.setBackgroundColor(colors.black)
+        self.monitor.clear()
+        system.update(system.fileName, properties)
+        if x >= 13 then
+            os.reboot()
+        elseif x < 4 then
+            os.shutdown()
+        end
+    end
+end
+
+local screensManagerScreen = {}
+screensManagerScreen.__index = setmetatable(screensManagerScreen, abstractScreen)
+
+function screensManagerScreen:init()
+end
+
+function screensManagerScreen:refresh()
+    --todo
+end
+
+function screensManagerScreen:onTouch(x, y)
+end
+
+---------monitorUtil---------
+monitorUtil = {
+    screens = {},
+    playerList = {}
+}
+
+monitorUtil.newScreen = function (name)
+    local screen = {}
+    local class
+    if name == "term" then
+        class = flightControlScreen
+    else
+        class = flightControlScreen
+    end
+    setmetatable(screen, class)
+    screen.__index = class
+    screen.name = name
+    local monitor
+    if name == "term" then
+        monitor = term
+    else
+        monitor = peripheral.wrap(name)
+    end
+    screen.monitor = monitor
+    screen:init()
+    return screen
+end
+
+monitorUtil.scanMonitors = function ()
+    local monitors = peripheral.getNames()
+    table.insert(monitors, "term")
+    for _, name in ipairs(monitors) do
+        if monitorUtil.screens[name] == nil then
+            if name == "term" or peripheral.getType(name) == "monitor" then
+                monitorUtil.screens[name] = monitorUtil.newScreen(name)
+            end
+        end
+    end
+    for name, _ in pairs(monitorUtil.screens) do
+        if not tableHasValue(monitors, name) then
+            monitorUtil.screens[name] = nil
+        end
+    end
+end
+
+monitorUtil.refresh = function ()
+    monitorUtil.scanMonitors()
+    for _, screen in pairs(monitorUtil.screens) do
+        screen:refresh()
     end
 end
 
 ---------main---------
 system.init()
+
+--[[if term.isColor() then
+    shell.run("fg","shell")
+end]]
+
+function flightUpdate()
+    if ship.isStatic() then
+        --static
+    elseif properties.mode == modelist.spaceShip.name then
+        pdControl.spaceShip()
+    elseif properties.mode == modelist.quadFPV.name then
+        pdControl.quadFPV()
+    elseif properties.mode == modelist.helicopt.name then
+        pdControl.helicopter()
+    elseif properties.mode == modelist.hms_fly.name then
+        pdControl.followMouse()
+    elseif properties.mode == modelist.follow.name then
+        pdControl.follow(scanner.commander)
+    elseif properties.mode == modelist.pointLoop.name then
+        pdControl.pointLoop()
+    elseif properties.mode == modelist.auto.name then
+        pdControl.gotoPosition(
+            { roll = 0, yaw = 120, pitch = 80 },
+            properties.HOME
+        )
+    end
+end
+
+function listener()
+    while true do
+        local eventData = {os.pullEvent()}
+        local event = eventData[1]
+
+        if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
+            monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
+        elseif event == "mouse_click" and monitorUtil.screens["term"] then
+            monitorUtil.screens["term"]:onTouch(eventData[3], eventData[4])
+        end
+    end
+end
 
 function run()
     attUtil.init()
@@ -1193,36 +1358,23 @@ function run()
         joyUtil.getJoyInput()
         scanner.entities = scanner.scanEntity()
         scanner.commander = scanner.getCommander()
-        if toMonitor then
-            monitorUtil.refresh()
-        end
-
-        if properties.mode == modelist.spaceShip.name then
-            pdControl.spaceShip()
-        elseif properties.mode == modelist.quadFPV.name then
-            pdControl.quadFPV()
-        elseif properties.mode == modelist.helicopt.name then
-            pdControl.helicopter()
-        elseif properties.mode == modelist.hms_fly.name then
-            pdControl.followMouse()
-        elseif properties.mode == modelist.follow.name then
-            pdControl.follow(scanner.commander)
-        elseif properties.mode == modelist.pointLoop.name then
-            pdControl.pointLoop()
-        elseif properties.mode == modelist.auto.name then
-            pdControl.gotoPosition(
-                { roll = 0, yaw = 120, pitch = 80 },
-                properties.HOME
-            )
-        end
+        monitorUtil.refresh()
+        flightUpdate()
         attUtil.setPreAtt()
         sleep(0.05)
     end
 end
 
-if toMonitor then
-    monitorUtil.init()
-    parallel.waitForAll(run, monitorUtil.listener)
-else
-    run()
+local _, err = pcall(function()
+    monitorUtil.scanMonitors()
+    parallel.waitForAll(run, listener)
+end)
+
+if err then
+    for _, screen in pairs(monitorUtil.screens) do
+        screen:onRootFatal()
+    end
+    if not err:find("Terminated") then
+        error(err)
+    end
 end
