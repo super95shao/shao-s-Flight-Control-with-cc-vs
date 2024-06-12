@@ -1167,7 +1167,7 @@ monitorUtil.listener = function()
                     end
                 end
             elseif monitorUtil.settingPage.miniSize.flag then
-                ship.setScale(0.1)
+                --ship.setScale(0.1)
             else
                 for key, value in pairs(monitorUtil.settingPage) do
                     if y == value.y then
