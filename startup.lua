@@ -820,7 +820,6 @@ monitorUtil = {
         User_Change = { y = 4, name = "User_Change", selected = false, flag = false },
         HOME_SET    = { y = 5, name = "Home_Set   ", selected = false, flag = false },
         Simulate    = { y = 6, name = "Simulate   ", selected = false, flag = false },
-        miniSize    = { y = 7, name = "*miniSize* ", selected = false, flag = false }
     },
     attPage = {
         compass = { name = "compass", flag = true },
@@ -1166,8 +1165,6 @@ monitorUtil.listener = function()
                         end
                     end
                 end
-            elseif monitorUtil.settingPage.miniSize.flag then
-                --ship.setScale(0.1)
             else
                 for key, value in pairs(monitorUtil.settingPage) do
                     if y == value.y then
