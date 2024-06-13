@@ -608,7 +608,7 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
     d = d * 200
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed * 2 + -attUtil.velocity.y * d
+    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
