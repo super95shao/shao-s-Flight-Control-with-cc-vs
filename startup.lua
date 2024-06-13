@@ -516,7 +516,7 @@ end
 ---------joyUtil---------
 joyUtil = {
     joy = nil,
-    joyConntected = false,
+    joyMissing = true,
     l_fb = 0,
     l_lr = 0,
     r_fb = 0,
@@ -535,6 +535,7 @@ joyUtil.getJoyInput = function()
         joyUtil.joy = peripheral.find("tweaked_controller")
     end
     if joyUtil.joy then
+        joyUtil.joyMissing = false
         joyUtil.flag = pcall(joyUtil.joy.hasUser)
         if not joyUtil.flag then
             return
@@ -566,14 +567,15 @@ joyUtil.getJoyInput = function()
         joyUtil.LB = joyUtil.LB and 1 or 0
         joyUtil.RB = joyUtil.RB and 1 or 0
     else
-        properties.mode = modelist.spaceShip.name
+        joyUtil.joyMissing = false
+        --[[properties.mode = modelist.spaceShip.name
         for k, v in pairs(modelist) do
             if v == modelist.spaceShip then
                 v.flag = true
             else
                 v.flag = false
             end
-        end
+        end]]
     end
 end
 
@@ -974,6 +976,20 @@ function flightGizmoScreen:report()
 end
 
 function flightGizmoScreen:refresh()
+    if not scanner.commander then
+        for k, v in pairs(self.mainPage) do
+            if v == self.mainPage.settings then
+                scanner.scanPlayer()
+                v.flag = true
+            else
+                v.flag = false
+            end
+        end
+        for k, v in pairs(self.settingPage) do
+            if v == self.settingPage.User_Change then v.flag = true
+            else v.flag = false end
+        end
+    end
     self.monitor.clear()
 
     for key, value in pairs(self.mainPage) do
@@ -1193,14 +1209,14 @@ function flightGizmoScreen:onTouch(x, y)
                 system.updatePersistentData()
             end
         elseif self.settingPage.PD_Tuning.flag then
-            properties.mode = modelist.spaceShip.name
+            --[[properties.mode = modelist.spaceShip.name
             for k, v in pairs(modelist) do
                 if v.name == modelist.spaceShip.name then
                     v.flag = true
                 else
                     v.flag = false
                 end
-            end
+            end]]
             if y == 2 and x < 3 then
                 self.settingPage.PD_Tuning.flag = false
                 system.updatePersistentData()
@@ -1641,9 +1657,9 @@ end
 ---------main---------
 system.init()
 
---[[if term.isColor() then
-    shell.run("bg","shell")
-end]]
+if term.isColor() then
+    shell.run("background","shell")
+end
 
 function flightUpdate()
     if ship.isStatic() then
@@ -1691,20 +1707,6 @@ function run()
         joyUtil.getJoyInput()
         scanner.entities = scanner.scanEntity()
         scanner.commander = scanner.getCommander()
-        if not scanner.commander then
-            for k, v in pairs(monitorUtil.mainPage) do
-                if v == monitorUtil.mainPage.settings then
-                    scanner.scanPlayer()
-                    v.flag = true
-                else
-                    v.flag = false
-                end
-            end
-            for k, v in pairs(monitorUtil.settingPage) do
-                if v == monitorUtil.settingPage.User_Change then v.flag = true
-                else v.flag = false end
-            end
-        end
         monitorUtil.refresh()
         flightUpdate()
         attUtil.setPreAtt()
@@ -1712,17 +1714,33 @@ function run()
     end
 end
 
-local _, err = pcall(function()
+xpcall(function()
     monitorUtil.scanMonitors()
     if monitorUtil.screens["computer"] == nil then
         monitorUtil.disconnectComputer()
     end
     parallel.waitForAll(run, listener)
-end)
-
-if err then
+    error("Unexpected flight control exit")
+end,function(err)
     monitorUtil.onRootFatal()
-    if not err:find("Terminated") then
-        error(err)
+    local c = term.current()
+    c.setTextColor(colors.white)
+    c.setBackgroundColor(colors.black)
+    c.clear()
+    c.setCursorPos(1, 1)
+    if c.setTextScale then
+        c.setTextScale(1)
     end
-end
+    if err:find("Terminated") then
+        c.setTextColor(colors.orange)
+        c.write("Flight control terminated")
+        c.setCursorPos(1, 2)
+    else
+        c.setTextColor(colors.red)
+        c.write("Flight control error:")
+        c.setCursorPos(1, 2)
+        c.write(err)
+        c.setCursorPos(1, 3)
+    end
+    c.setTextColor(colors.white)
+end)
