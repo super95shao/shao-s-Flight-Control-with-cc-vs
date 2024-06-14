@@ -17,10 +17,15 @@ system = {
 }
 
 system.init = function()
-    ship.setScale(1)
     system.file = io.open(system.fileName, "r")
     if system.file then
-        properties = textutils.unserialise(system.file:read("a"))
+        local tmpProp = textutils.unserialise(system.file:read("a"))
+        properties = system.reset()
+        for k, v in pairs(properties) do
+            if tmpProp[k] then
+                properties[k] = tmpProp[k]
+            end
+        end
         if properties.omega_D > 1.52 then properties.omega_D = 1.52 end
         system.file:close()
     else
@@ -37,7 +42,7 @@ end
 
 system.reset = function()
     local firstMonitor = peripheral.find("monitor")
-    local enabledMonitors = {"computer"}
+    local enabledMonitors = { "computer" }
     if firstMonitor then
         table.insert(enabledMonitors, peripheral.getName(firstMonitor))
     end
@@ -49,16 +54,22 @@ system.reset = function()
             { x = 0, y = 120, z = 0 }
         },
         enabledMonitors = enabledMonitors,
-        omega_P = 1,            --角速度比例, 决定转向快慢
-        omega_D = 1.52,         --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-        space_Acc = 2,          --星舰模式油门速度
-        quad_Acc = 1,           --四轴FPV模式油门强度
-        move_D = 1.6,           --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+        omega_P = 1,    --角速度比例, 决定转向快慢
+        omega_D = 1.52, --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+        space_Acc = 2,  --星舰模式油门速度
+        quad_Acc = 1,   --四轴FPV模式油门强度
+        move_D = 1.6,   --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+        helicopt_YAW_P = 0.5,
+        helicopt_ROT_D = 0.75,
+        helicopt_MAX_ANGLE = 45,
+        helicopt_ACC = 0.5,
+        helicopt_ACC_D = 0.5,
         ZeroPoint = 0,
         MAX_MOVE_SPEED = 99,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
         pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
         quadAutoHover = false,
+        helicoptAutoHover = false,
         spaceShipLock = false,
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
@@ -80,7 +91,7 @@ system.write = function(file, obj)
 end
 
 -----------function------------
-function tableHasValue (targetTable, targetValue)
+function tableHasValue(targetTable, targetValue)
     for index, value in ipairs(targetTable) do
         if index ~= 'metatable' and value == targetValue then
             return true
@@ -90,35 +101,35 @@ function tableHasValue (targetTable, targetValue)
 end
 
 local function joinArrayTables(...)
-	local entries = {}
-	for i = 1, select('#', ... ) do
-		local t = select(i, ... )
-		for i, v in ipairs( t ) do
-			table.insert(entries, v)
-		end
-	end
-	return entries
+    local entries = {}
+    for i = 1, select('#', ...) do
+        local t = select(i, ...)
+        for i, v in ipairs(t) do
+            table.insert(entries, v)
+        end
+    end
+    return entries
 end
 
 local function arrayTableDuplicate(targetTable)
-	local entries = {}
-	local seenValues = {}
-	for i, v in ipairs( targetTable ) do
-		if not seenValues[v] then
-			seenValues[v] = true
-			table.insert(entries, v)
-		end
-	end
-	return entries
+    local entries = {}
+    local seenValues = {}
+    for i, v in ipairs(targetTable) do
+        if not seenValues[v] then
+            seenValues[v] = true
+            table.insert(entries, v)
+        end
+    end
+    return entries
 end
 
 local function arrayTableRemoveElement(targetTable, value)
-	for i, v in ipairs( targetTable ) do
-		if v == value then
+    for i, v in ipairs(targetTable) do
+        if v == value then
             table.remove(targetTable, i)
             return
-		end
-	end
+        end
+    end
 end
 
 function copysign(num1, num2)
@@ -170,25 +181,19 @@ function RotateVectorByQuat(quat, v)
     return res
 end
 
-local FPoint, LPoint
 function quat2Euler(quat)
-    FPoint = RotateVectorByQuat(quat, { x = 1, y = 0, z = 0 })
-    LPoint = RotateVectorByQuat(quat, { x = 0, y = 0, z = -1 })
-    --ag.pitch = math.deg(math.atan2(FPoint.y, copysign(math.sqrt(FPoint.x ^ 2 + FPoint.z ^ 2), TopPoint.y)))
-    --ag.yaw = -math.deg(math.atan2(LPoint.x, -LPoint.z))
-    --[[     if math.abs(FPoint.y) < 0.1 then
-        ag.yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
-    else
-        ag.yaw = math.deg(math.atan2(TopPoint.z, -TopPoint.x))
-        if FPoint.y < 0 then
-            ag.yaw = resetAngelRange(ag.yaw - 180)
-        end
-    end ]]
-    return {
-        roll = math.deg(math.asin(LPoint.y)),
-        pitch = math.deg(math.asin(FPoint.y)),
-        yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
-    }
+    local FPoint = RotateVectorByQuat(quat, { x = 1, y = 0, z = 0 })
+    local LPoint = RotateVectorByQuat(quat, { x = 0, y = 0, z = -1 })
+    local TopPoint = RotateVectorByQuat(quat, { x = 0, y = 1, z = 0 })
+    local ag = {}
+    ag.pitch = math.deg(math.atan2(FPoint.y, copysign(math.sqrt(FPoint.x ^ 2 + FPoint.z ^ 2), TopPoint.y)))
+    ag.yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
+    ag.roll = math.deg(math.asin(LPoint.y))
+    if math.abs(ag.pitch) > 90 then
+        ag.yaw = -ag.yaw
+        ag.roll = -ag.roll
+    end
+    return ag
 end
 
 function getEulerByMatrix(matrix)
@@ -375,8 +380,9 @@ scanner.getCommander = function()
             if v.name == properties.userName then
                 result = v
                 result.y = result.y + 1.6
-                result.yaw = -math.deg(math.atan2(result.raw_euler_x, result.raw_euler_z))
-                result.pitch = math.deg(math.asin(result.raw_euler_y))
+                result.roll = 0
+                result.yaw = math.deg(math.atan2(result.raw_euler_z, -result.raw_euler_x))
+                result.pitch = -math.deg(math.asin(result.raw_euler_y))
                 return result
             end
         end
@@ -402,13 +408,13 @@ scanner.getRCAngle = function(range)
 
     targetAngle._c = math.sqrt(pos.x ^ 2 + pos.z ^ 2)
     targetAngle.distance = math.sqrt(targetAngle._c ^ 2 + pos.y ^ 2)
-    targetAngle.yaw = -math.deg(math.atan2(pos.z / targetAngle._c, pos.x / targetAngle._c))
     targetAngle.pitch = -math.deg(math.asin(pos.y / targetAngle.distance))
+    targetAngle.yaw = -math.deg(math.atan2(pos.z / targetAngle._c, pos.x / targetAngle._c))
     targetAngle.roll = 0
     return targetAngle
 end
 
-scanner.scanPlayer = function ()
+scanner.scanPlayer = function()
     if scanner.entities ~= nil then
         scanner.playerList = {}
         for k, v in pairs(scanner.entities) do
@@ -444,8 +450,13 @@ attUtil = {
     initPoint = {},
     velocity = {},
     speed = {},
-    lastPos = {},
-    lastEuler = {}
+    tmpFlags = {
+        spaceShipLastPos = ship.getWorldspacePosition(),
+        spaceShipLastEuler = {roll = 0, yaw = 0, pitch = 0},
+        hmsLastAtt = {roll = 0, yaw = 0, pitch = 0},
+        helicoptLastPos = ship.getWorldspacePosition(),
+        helicoptLastEuler = {roll = 0, yaw = 0, pitch = 0},
+    }
 }
 
 attUtil.getAtt = function()
@@ -464,9 +475,8 @@ attUtil.getAtt = function()
     attUtil.conjQuat.y = -attUtil.quat.y
     attUtil.conjQuat.z = -attUtil.quat.z
     attUtil.matrix = ship.getRotationMatrix()
-    attUtil.eulerAngle = getEulerByMatrix(attUtil.matrix)
-
-    --attUtil.eulerAngle = quat2Euler(attUtil.quat)
+    --attUtil.eulerAngle = getEulerByMatrix(attUtil.matrix)
+    attUtil.eulerAngle = quat2Euler(attUtil.quat)
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
@@ -531,7 +541,7 @@ joyUtil = {
 }
 
 joyUtil.getJoyInput = function()
-    if not joyUtil.joy or not peripheral.hasType(joyUtil.joy,"tweaked_controller") then
+    if not joyUtil.joy or not peripheral.hasType(joyUtil.joy, "tweaked_controller") then
         joyUtil.joy = peripheral.find("tweaked_controller")
     end
     if joyUtil.joy then
@@ -652,53 +662,51 @@ pdControl.rotInner = function(xRot, yRot, zRot, p, d)
         pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor)
 end
 
-pdControl.rotate2Euler = function(euler)
+pdControl.rotate2Euler = function(euler, p, d)
     local tgAg, roll, yaw, pitch = {}, 0, 0, 0
     local selfAg = attUtil.eulerAngle
-    tgAg.roll = resetAngelRange(euler.roll - selfAg.roll)
-    tgAg.yaw = resetAngelRange(euler.yaw - selfAg.yaw)
+    euler.pitch = math.abs(euler.pitch) > 45 and copysign(45, euler.pitch) or euler.pitch
+    tgAg.roll  = resetAngelRange(euler.roll - selfAg.roll)
+    tgAg.yaw   = resetAngelRange(euler.yaw - selfAg.yaw)
     tgAg.pitch = resetAngelRange(euler.pitch - selfAg.pitch)
-    if math.abs(selfAg.pitch) >= 90 then
-        tgAg.yaw = -tgAg.yaw
-    end
 
-    yaw   = tgAg.yaw * (1 - attUtil.pX.y ^ 2) + -tgAg.roll * (attUtil.pX.y ^ 2)
-    roll  = tgAg.roll * (1 - attUtil.pX.y ^ 2) + tgAg.yaw * (attUtil.pX.y ^ 2)
-    pitch = tgAg.pitch * (1 - attUtil.pZ.y ^ 2) + tgAg.yaw * (attUtil.pZ.y ^ 2)
-    roll  = roll * 1.1
-    yaw   = yaw * 1.1
-    pitch = pitch * 1.1
+    yaw        = tgAg.yaw * (1 - attUtil.pX.y ^ 2) + -tgAg.roll * (attUtil.pX.y ^ 2)
+    roll       = tgAg.roll * (1 - attUtil.pX.y ^ 2) + tgAg.yaw * (attUtil.pX.y ^ 2)
+    pitch      = tgAg.pitch * (1 - attUtil.pZ.y ^ 2) + tgAg.yaw * (attUtil.pZ.y ^ 2)
+    roll       = roll
+    yaw        = yaw
+    pitch      = pitch
 
-    pdControl.rotInner(roll, yaw, pitch, properties.omega_P, properties.omega_D)
+    pdControl.rotInner(roll, yaw, pitch, p, d)
 end
 
 pdControl.rotate2Euler2 = function(euler)
     local tmpx = {
         x = -math.cos(math.rad(euler.yaw)),
         y = -math.sin(math.rad(euler.pitch)),
-        z = math.sin(math.rad(euler
-            .yaw))
+        z = math.sin(math.rad(euler.yaw))
     }
     local tmpz = {
         x = math.sin(math.rad(euler.yaw)),
         y = math.sin(math.rad(euler.roll)),
-        z = -math.cos(math.rad(euler
-            .yaw))
+        z = -math.cos(math.rad(euler.yaw))
     }
+
     local newXpoint = RotateVectorByQuat(attUtil.conjQuat, tmpx)
     local newZpoint = RotateVectorByQuat(attUtil.conjQuat, tmpz)
     local roll = math.deg(math.asin(newZpoint.y))
     local yaw = math.deg(math.atan2(newXpoint.z, -newXpoint.x))
     local pitch = -math.deg(math.asin(newXpoint.y))
-    --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(roll, yaw, pitch))
-    pdControl.rotInner(roll, yaw, pitch, properties.omega_P, properties.omega_D)
+
+    commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(roll, yaw, pitch))
+    --pdControl.rotInner(roll, yaw, pitch, properties.omega_P, properties.omega_D)
 end
 
 pdControl.spaceShip = function()
     if properties.spaceShipLock then
-        if next(attUtil.lastEuler) == nil then attUtil.lastEuler = attUtil.eulerAngle end
-        if next(attUtil.lastPos) == nil then attUtil.lastPos = attUtil.position end
-        pdControl.gotoPosition(attUtil.lastEuler, attUtil.lastPos)
+        if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then attUtil.tmpFlags.spaceShipLastEuler = attUtil.eulerAngle end
+        if next(attUtil.tmpFlags.spaceShipLastPos) == nil then attUtil.tmpFlags.spaceShipLastPos = attUtil.position end
+        pdControl.gotoPosition(attUtil.tmpFlags.spaceShipLastEuler, attUtil.tmpFlags.spaceShipLastPos)
     else
         pdControl.moveWithRot(
             math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
@@ -715,7 +723,6 @@ pdControl.spaceShip = function()
         properties.omega_P,
         properties.omega_D)
 end
-
 
 pdControl.quadFPV = function()
     if properties.quadAutoHover then
@@ -751,13 +758,15 @@ pdControl.quadFPV = function()
             }
             euler.roll = math.abs(euler.roll) > 70 and copysign(70, euler.roll) or euler.roll
             euler.pitch = math.abs(euler.pitch) > 70 and copysign(70, euler.pitch) or euler.pitch
-            pdControl.rotate2Euler(euler)
+            pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
         else
             pdControl.rotate2Euler({
-                roll = math.deg(math.asin(joyUtil.r_lr)) / 1.5,
-                yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 45,
-                pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
-            })
+                    roll = math.deg(math.asin(joyUtil.r_lr)) / 1.5,
+                    yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 40,
+                    pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
+                },
+                properties.omega_P,
+                properties.omega_D)
         end
     else
         pdControl.quadUp(
@@ -775,25 +784,38 @@ pdControl.quadFPV = function()
 end
 
 pdControl.helicopter = function()
-    if joyUtil.l_fb == 0 then
-        pdControl.quadUp(
-            0,
-            properties.quad_Acc,
-            properties.move_D,
-            true)
+    local acc
+    local tgAg = {}
+    if properties.helicoptAutoHover then
+        local tmpPos = {}
+        tmpPos.y = attUtil.tmpFlags.helicoptLastPos.y - (attUtil.position.y + attUtil.velocity.y * 20)
+        acc = tmpPos.y * 10
+        acc = math.abs(acc) > 90 and copysign(90, acc) or acc
+        tgAg.yaw = attUtil.tmpFlags.helicoptLastEuler.yaw
+        tmpPos.x = attUtil.tmpFlags.helicoptLastPos.x - (attUtil.position.x + attUtil.velocity.x * 80)
+        tmpPos.z = attUtil.tmpFlags.helicoptLastPos.z - (attUtil.position.z + attUtil.velocity.z * 80)
+        tmpPos = RotateVectorByQuat(attUtil.conjQuat, tmpPos)
+        tmpPos.tmp_c = math.sqrt(tmpPos.x ^ 2 + tmpPos.z ^ 2)
+        tgAg.roll = math.deg(math.asin(tmpPos.z / tmpPos.tmp_c))
+        tgAg.roll = tgAg.roll ~= tgAg.roll and 0 or tgAg.roll * tmpPos.tmp_c * 0.01
+        tgAg.roll = math.abs(tgAg.roll) > 45 and copysign(45, tgAg.roll) or tgAg.roll
+        tgAg.pitch = -math.deg(math.asin(tmpPos.x / tmpPos.tmp_c))
+        tgAg.pitch = tgAg.pitch ~= tgAg.pitch and 0 or tgAg.pitch * tmpPos.tmp_c * 0.01
+        tgAg.pitch = math.abs(tgAg.pitch) > 45 and copysign(45, tgAg.pitch) or tgAg.pitch
     else
-        pdControl.quadUp(
-            math.deg(math.asin(joyUtil.l_fb)),
-            properties.quad_Acc,
-            properties.move_D,
-            false)
+        acc = math.deg(math.asin(joyUtil.l_fb))
+        tgAg.roll = math.deg(math.asin(joyUtil.r_lr)) * (properties.helicopt_MAX_ANGLE / 90)
+        tgAg.yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 40 * properties.helicopt_YAW_P
+        tgAg.pitch = math.deg(math.asin(joyUtil.r_fb)) * (properties.helicopt_MAX_ANGLE / 90)
     end
 
-    pdControl.rotate2Euler({
-        roll = math.deg(math.asin(joyUtil.r_lr)) / 2,
-        yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 20 * properties.omega_P,
-        pitch = math.deg(math.asin(joyUtil.r_fb) / 2)
-    })
+    pdControl.quadUp(
+        acc,
+        properties.helicopt_ACC,
+        properties.helicopt_ACC_D,
+        true)
+
+    pdControl.rotate2Euler(tgAg, properties.helicopt_ROT_D, properties.helicopt_ROT_D)
 end
 
 pdControl.gotoPosition = function(euler, pos)
@@ -813,7 +835,7 @@ pdControl.gotoPosition = function(euler, pos)
         properties.move_D
     )
     if euler then
-        pdControl.rotate2Euler(euler)
+        pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
     end
 end
 
@@ -839,14 +861,13 @@ pdControl.HmsSpaceBasedGun = function()
     )
 end
 
-local lastAtt = { roll = 0, yaw = 0, pitch = 0 }
 pdControl.followMouse = function()
     if joyUtil.flag then
         if joyUtil.joy.hasUser() then
-            lastAtt = scanner.getRCAngle(16)
+            attUtil.tmpFlags.hmsLastAtt = scanner.commander
         end
     end
-    pdControl.rotate2Euler(lastAtt)
+    pdControl.rotate2Euler(attUtil.tmpFlags.hmsLastAtt, properties.omega_P, properties.omega_D)
 
     pdControl.moveWithRot(
         math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
@@ -903,8 +924,11 @@ local abstractScreen = {
 abstractScreen.__index = abstractScreen
 
 function abstractScreen:init() end
+
 function abstractScreen:refresh() end
+
 function abstractScreen:onTouch(x, y) end
+
 function abstractScreen:onDisconnect()
     self.monitor.setTextColor(colors.white)
     self.monitor.setBackgroundColor(colors.black)
@@ -912,6 +936,7 @@ function abstractScreen:onDisconnect()
     self.monitor.setCursorPos(1, 1)
     self.monitor.write("[DISCONNECTED]")
 end
+
 function abstractScreen:onRootFatal()
     self.monitor.setTextColor(colors.white)
     self.monitor.setBackgroundColor(colors.blue)
@@ -922,6 +947,7 @@ function abstractScreen:onRootFatal()
         self.monitor.write(":(")
     end
 end
+
 function abstractScreen:onBlank()
     self.monitor.setTextColor(colors.white)
     self.monitor.setBackgroundColor(colors.black)
@@ -931,6 +957,7 @@ function abstractScreen:onBlank()
         self.monitor.setTextScale(1)
     end
 end
+
 function abstractScreen:report() end
 
 -- flightGizmoScreen
@@ -951,8 +978,8 @@ function flightGizmoScreen:init()
         settings     = { x = 11, name = " SET ", flag = false }
     }
     self.settingPage = {
-        Essentials  = { y = 3, name = "Essentials ", selected = false, flag = false },
-        PD_Tuning   = { y = 4, name = "PD_Tuning  ", selected = false, flag = false },
+        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
+        helicopter  = { y = 4, name = "Helicopter ", selected = false, flag = false },
         User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
         HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
         Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false },
@@ -986,8 +1013,11 @@ function flightGizmoScreen:refresh()
             end
         end
         for k, v in pairs(self.settingPage) do
-            if v == self.settingPage.User_Change then v.flag = true
-            else v.flag = false end
+            if v == self.settingPage.User_Change then
+                v.flag = true
+            else
+                v.flag = false
+            end
         end
     end
     self.monitor.clear()
@@ -1018,6 +1048,15 @@ function flightGizmoScreen:refresh()
         if properties.mode == modelist.spaceShip.name then
             self.monitor.setCursorPos(12, modelist.spaceShip.y)
             if properties.spaceShipLock then
+                self.monitor.blit(" L", "ff", "33")
+            else
+                self.monitor.blit(" N", "88", "33")
+            end
+        end
+
+        if properties.mode == modelist.helicopt.name then
+            self.monitor.setCursorPos(12, modelist.helicopt.y)
+            if properties.helicoptAutoHover then
                 self.monitor.blit(" L", "ff", "33")
             else
                 self.monitor.blit(" N", "88", "33")
@@ -1066,13 +1105,7 @@ function flightGizmoScreen:refresh()
             end
         end
     elseif self.mainPage.settings.flag then --settingPage
-        if self.settingPage.Essentials.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("W A S D", "fffffff", "e3e3e3e")
-        elseif self.settingPage.PD_Tuning.flag then
+        if self.settingPage.PD_Tuning.flag then
             properties.spaceShipLock = false
             self.monitor.setCursorPos(1, 2)
             self.monitor.blit("<<", "24", "33")
@@ -1101,6 +1134,34 @@ function flightGizmoScreen:refresh()
             self.monitor.blit("MOVE_D: -   +", "fffffffffffff", "33333333b333e")
             self.monitor.setCursorPos(11, 8)
             self.monitor.write(string.format("%0.1f", properties.move_D))
+        elseif self.settingPage.helicopter.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
+
+            self.monitor.setCursorPos(2, 3)
+            self.monitor.blit("Yaw_P--    ++", "fffffffffffff", "33333b533331e")
+            self.monitor.setCursorPos(9, 3)
+            self.monitor.write(string.format("%0.2f", properties.helicopt_YAW_P))
+
+            self.monitor.setCursorPos(2, 4)
+            self.monitor.blit("Rot_D--    ++", "fffffffffffff", "33333b533331e")
+            self.monitor.setCursorPos(9, 4)
+            self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_D))
+
+            self.monitor.setCursorPos(2, 5)
+            self.monitor.blit("ACC:-   +", "fffffffff", "3333b333e")
+            self.monitor.setCursorPos(7, 5)
+            self.monitor.write(string.format("%0.1f", properties.helicopt_ACC))
+
+            self.monitor.setCursorPos(2, 6)
+            self.monitor.blit("Acc_D--    ++", "fffffffffffff", "33333b533331e")
+            self.monitor.setCursorPos(9, 6)
+            self.monitor.write(string.format("%0.2f", properties.helicopt_ACC_D))
+
+            self.monitor.setCursorPos(2, 7)
+            self.monitor.blit("MaxAngle:-  +", "fffffffffffff", "333333333b33e")
+            self.monitor.setCursorPos(12, 7)
+            self.monitor.write(string.format("%d", properties.helicopt_MAX_ANGLE))
         elseif self.settingPage.User_Change.flag then
             self.monitor.setCursorPos(1, 2)
             self.monitor.blit("<<", "24", "33")
@@ -1195,28 +1256,19 @@ function flightGizmoScreen:onTouch(x, y)
             end
         else
             if y == modelist.spaceShip.y then
-                attUtil.lastPos = attUtil.position
-                attUtil.lastEuler = attUtil.eulerAngle
+                attUtil.tmpFlags.spaceShipLastPos = attUtil.position
+                attUtil.tmpFlags.spaceShipLastEuler = attUtil.eulerAngle
                 properties.spaceShipLock = not properties.spaceShipLock
+            elseif y == modelist.helicopt.y then
+                attUtil.tmpFlags.helicoptLastPos = attUtil.position
+                attUtil.tmpFlags.helicoptLastEuler = attUtil.eulerAngle
+                properties.helicoptAutoHover = not properties.helicoptAutoHover
             elseif y == modelist.quadFPV.y then
                 properties.quadAutoHover = not properties.quadAutoHover
             end
         end
     elseif self.mainPage.settings.flag then
-        if self.settingPage.Essentials.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.Essentials.flag = false
-                system.updatePersistentData()
-            end
-        elseif self.settingPage.PD_Tuning.flag then
-            --[[properties.mode = modelist.spaceShip.name
-            for k, v in pairs(modelist) do
-                if v.name == modelist.spaceShip.name then
-                    v.flag = true
-                else
-                    v.flag = false
-                end
-            end]]
+        if self.settingPage.PD_Tuning.flag then
             if y == 2 and x < 3 then
                 self.settingPage.PD_Tuning.flag = false
                 system.updatePersistentData()
@@ -1262,6 +1314,57 @@ function flightGizmoScreen:onTouch(x, y)
                 elseif x == 14 then
                     if properties.move_D < 1.6 then
                         properties.move_D = properties.move_D + 0.1
+                    end
+                end
+            end
+        elseif self.settingPage.helicopter.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.helicopter.flag = false
+                system.updatePersistentData()
+            end
+
+            if y == 3 then
+                if x == 7 then
+                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.1
+                elseif x == 8 then
+                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.01
+                elseif x == 13 then
+                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.01
+                elseif x == 14 then
+                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.1
+                end
+            elseif y == 4 then
+                if x == 7 then
+                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.1
+                elseif x == 8 then
+                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.01
+                elseif x == 13 then
+                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.01
+                elseif x == 14 then
+                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.1
+                end
+            elseif y == 5 then
+                if x == 6 then
+                    properties.helicopt_ACC = properties.helicopt_ACC - 0.1
+                elseif x == 10 then
+                    properties.helicopt_ACC = properties.helicopt_ACC + 0.1
+                end
+            elseif y == 6 then
+                if x == 7 then
+                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.1
+                elseif x == 8 then
+                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.01
+                elseif x == 13 then
+                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.01
+                elseif x == 14 then
+                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.1
+                end
+            elseif y == 7 then
+                if x == 11 then
+                    properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE - 1
+                elseif x == 14 then
+                    if properties.helicopt_MAX_ANGLE < 60 then
+                        properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE + 1
                     end
                 end
             end
@@ -1357,8 +1460,9 @@ function screensManagerScreen:init()
 end
 
 function screensManagerScreen:refresh()
-    local redirects = arrayTableDuplicate(joinArrayTables({"computer"},monitorUtil.getMonitorNames(),properties.enabledMonitors))
-	table.sort(redirects, function(n1, n2)
+    local redirects = arrayTableDuplicate(joinArrayTables({ "computer" }, monitorUtil.getMonitorNames(),
+        properties.enabledMonitors))
+    table.sort(redirects, function(n1, n2)
         local s1 = monitorUtil.getMonitorSort(n1)
         local s2 = monitorUtil.getMonitorSort(n2)
         if s1 ~= s2 then
@@ -1366,7 +1470,7 @@ function screensManagerScreen:refresh()
         else
             return n1 < n2
         end
-	end)
+    end)
     self.monitor.setTextColor(colors.white)
     self.monitor.setBackgroundColor(colors.lightBlue)
     self.monitor.clear()
@@ -1374,7 +1478,7 @@ function screensManagerScreen:refresh()
     self.monitor.write("Monitors:")
     local newrows = {}
     for i, name in ipairs(redirects) do
-        self.monitor.setCursorPos(1, i+1)
+        self.monitor.setCursorPos(1, i + 1)
         self.monitor.write(("%2i."):format(i))
         local status
         local title
@@ -1396,16 +1500,16 @@ function screensManagerScreen:refresh()
             title = monitorUtil.screens[name].screenTitle
             report = text
         end
-        table.insert(newrows,name)
+        table.insert(newrows, name)
         if name == "computer" then
             name = os.getComputerLabel() or name
         end
-        self.monitor.write(name.." ["..status.."]")
+        self.monitor.write(name .. " [" .. status .. "]")
         if title then
-            self.monitor.write("["..title.."]")
+            self.monitor.write("[" .. title .. "]")
         end
         if report then
-            self.monitor.write("["..report.."]")
+            self.monitor.write("[" .. report .. "]")
         end
         self.monitor.setBackgroundColor(colors.lightBlue)
     end
@@ -1413,7 +1517,7 @@ function screensManagerScreen:refresh()
 end
 
 function screensManagerScreen:onTouch(x, y)
-    local name = self.rows[y-1]
+    local name = self.rows[y - 1]
     if name then
         if tableHasValue(properties.enabledMonitors, name) then
             arrayTableRemoveElement(properties.enabledMonitors, name)
@@ -1435,9 +1539,9 @@ screenPickerScreen.__index = setmetatable(screenPickerScreen, abstractScreen)
 function screenPickerScreen:init()
     self.rows = {}
     if self.name == "computer" then
-        table.insert(self.rows, {name = "screens manager",class = screensManagerScreen})
+        table.insert(self.rows, { name = "screens manager", class = screensManagerScreen })
     end
-    table.insert(self.rows, {name = "flight gizmo",class = flightGizmoScreen})
+    table.insert(self.rows, { name = "flight gizmo", class = flightGizmoScreen })
     if #self.rows == 1 then
         monitorUtil.newScreen(self.name, self.rows[1].class)
         return
@@ -1455,9 +1559,9 @@ function screenPickerScreen:refresh()
         self.monitor.write("no screen available!")
     else
         for i, row in ipairs(self.rows) do
-            self.monitor.setCursorPos(1, i+1)
+            self.monitor.setCursorPos(1, i + 1)
             self.monitor.write(("%2i."):format(i))
-            if i%2==0 then
+            if i % 2 == 0 then
                 self.monitor.setBackgroundColor(colors.lightGray)
             else
                 self.monitor.setBackgroundColor(colors.gray)
@@ -1469,7 +1573,7 @@ function screenPickerScreen:refresh()
 end
 
 function screenPickerScreen:onTouch(x, y)
-    local row = self.rows[y-1]
+    local row = self.rows[y - 1]
     if row then
         monitorUtil.newScreen(self.name, row.class)
     end
@@ -1484,7 +1588,7 @@ loadingScreen.__index = setmetatable(loadingScreen, abstractScreen)
 
 
 function loadingScreen:report()
-    return "Loading: "..("%i"):format(math.floor(self.step*100/16)).."%", colors.orange
+    return "Loading: " .. ("%i"):format(math.floor(self.step * 100 / 16)) .. "%", colors.orange
 end
 
 function loadingScreen:init()
@@ -1510,8 +1614,8 @@ function loadingScreen:refresh()
         self.monitor.setCursorPos(offset_x + 9 - #properties.userName / 2, offset_y + 5)
         self.monitor.write(properties.userName)
 
-        self.monitor.setCursorPos(offset_x + 9 - #self.name/ 2 - 1, offset_y + 9)
-        self.monitor.write("["..self.name.."]")
+        self.monitor.setCursorPos(offset_x + 9 - #self.name / 2 - 1, offset_y + 9)
+        self.monitor.write("[" .. self.name .. "]")
 
         self.monitor.setCursorPos(offset_x + 1, offset_y + 7)
     end
@@ -1533,7 +1637,7 @@ monitorUtil = {
     screens = {}
 }
 
-monitorUtil.newScreen = function (name, class)
+monitorUtil.newScreen = function(name, class)
     local screen = {}
     monitorUtil.screens[name] = screen
     if not class then
@@ -1553,7 +1657,7 @@ monitorUtil.newScreen = function (name, class)
     return monitorUtil.screens[name] --init有可能会改变屏幕类
 end
 
-monitorUtil.disconnectComputer = function ()
+monitorUtil.disconnectComputer = function()
     local c = term.current()
     c.setTextColor(colors.white)
     c.setBackgroundColor(colors.black)
@@ -1565,7 +1669,7 @@ monitorUtil.disconnectComputer = function ()
     c.setCursorPos(1, 3)
 end
 
-monitorUtil.disconnect = function (name)
+monitorUtil.disconnect = function(name)
     if monitorUtil.screens[name] ~= nil and (name == "computer" or peripheral.isPresent(name)) then
         monitorUtil.screens[name]:onDisconnect()
         monitorUtil.screens[name] = nil
@@ -1575,7 +1679,7 @@ monitorUtil.disconnect = function (name)
     end
 end
 
-monitorUtil.hasMonitor = function (name)
+monitorUtil.hasMonitor = function(name)
     if name == "computer" then
         return term.current().isColor()
     elseif peripheral.isPresent(name) and peripheral.hasType(name, "monitor") and peripheral.call(name, "isColor") then
@@ -1585,7 +1689,7 @@ monitorUtil.hasMonitor = function (name)
     end
 end
 
-monitorUtil.scanMonitors = function ()
+monitorUtil.scanMonitors = function()
     for _, name in ipairs(properties.enabledMonitors) do
         if monitorUtil.screens[name] == nil then
             if name == "computer" or monitorUtil.hasMonitor(name) then
@@ -1602,14 +1706,14 @@ monitorUtil.scanMonitors = function ()
     end
 end
 
-monitorUtil.refresh = function ()
+monitorUtil.refresh = function()
     monitorUtil.scanMonitors()
     for _, screen in pairs(monitorUtil.screens) do
         screen:refresh()
     end
 end
 
-monitorUtil.getMonitorNames = function ()
+monitorUtil.getMonitorNames = function()
     local monitors = peripheral.getNames()
     local result = {}
     table.insert(monitors, "term")
@@ -1621,13 +1725,13 @@ monitorUtil.getMonitorNames = function ()
     return result
 end
 
-monitorUtil.blankAllScreens = function ()
+monitorUtil.blankAllScreens = function()
     for _, screen in pairs(monitorUtil.screens) do
         screen:onBlank()
     end
 end
 
-monitorUtil.onRootFatal = function ()
+monitorUtil.onRootFatal = function()
     for _, screen in pairs(monitorUtil.screens) do
         screen:onRootFatal()
     end
@@ -1658,7 +1762,7 @@ end
 system.init()
 
 if term.isColor() then
-    shell.run("background","shell")
+    shell.run("background", "shell")
 end
 
 function flightUpdate()
@@ -1686,7 +1790,7 @@ end
 
 function listener()
     while true do
-        local eventData = {os.pullEvent()}
+        local eventData = { os.pullEvent() }
         local event = eventData[1]
 
         if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
@@ -1721,7 +1825,7 @@ xpcall(function()
     end
     parallel.waitForAll(run, listener)
     error("Unexpected flight control exit")
-end,function(err)
+end, function(err)
     monitorUtil.onRootFatal()
     local c = term.current()
     c.setTextColor(colors.white)
