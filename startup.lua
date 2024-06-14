@@ -1,3 +1,14 @@
+if not ship then
+    if term.isColor() then term.setTextColor(colors.red) end
+    print("ShipAPI unavailable. Either this computer is not on a ship, or CC-VS is not installed.")
+    return
+end
+if not ship.setStatic then
+    if term.isColor() then term.setTextColor(colors.red) end
+    print("ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
+    return
+end
+
 ---------inner---------
 local modelist = {
     spaceShip = { y = 3, name = "spaceShip ", flag = false },
@@ -362,14 +373,19 @@ scanner = {
     }
 }
 
+scanner.scan = function()
+    if not coordinate then
+        return
+    end
+    scanner.entities = scanner.scanEntity()
+    scanner.commander = scanner.getCommander()
+end
+
 scanner.scanShip = function()
     return coordinate.getShips(256)
 end
 
 scanner.scanEntity = function()
-    if not coordinate then
-        return {}
-    end
     return coordinate.getEntities(-1)
 end
 
@@ -878,6 +894,11 @@ pdControl.followMouse = function()
 end
 
 pdControl.follow = function(target)
+    if not target then
+        -- TODO:插入悬停飞控
+        -- pdControl.staticHover()
+        return
+    end
     local pos, qPos = {}, {}
     qPos.x = copysign(attUtil.size.x / 2, properties.followRange.x) + properties.followRange.x
     qPos.y = copysign(attUtil.size.y / 2, properties.followRange.y) + properties.followRange.y
@@ -1003,7 +1024,7 @@ function flightGizmoScreen:report()
 end
 
 function flightGizmoScreen:refresh()
-    if not scanner.commander then
+    if coordinate and not scanner.commander then
         for k, v in pairs(self.mainPage) do
             if v == self.mainPage.settings then
                 scanner.scanPlayer()
@@ -1700,7 +1721,7 @@ monitorUtil.scanMonitors = function()
     for _, name in ipairs(properties.enabledMonitors) do
         if not monitorUtil.hasMonitor(name) then
             monitorUtil.screens[name] = nil
-        elseif name ~= "computer" and not tableHasValue(properties.enabledMonitors, name) then
+        elseif not tableHasValue(properties.enabledMonitors, name) then
             monitorUtil.disconnect(name)
         end
     end
@@ -1805,12 +1826,10 @@ function listener()
 end
 
 function run()
-    attUtil.init()
     while true do
         attUtil.getAtt()
         joyUtil.getJoyInput()
-        scanner.entities = scanner.scanEntity()
-        scanner.commander = scanner.getCommander()
+        scanner.scan()
         monitorUtil.refresh()
         flightUpdate()
         attUtil.setPreAtt()
@@ -1823,6 +1842,7 @@ xpcall(function()
     if monitorUtil.screens["computer"] == nil then
         monitorUtil.disconnectComputer()
     end
+    attUtil.init()
     parallel.waitForAll(run, listener)
     error("Unexpected flight control exit")
 end, function(err)
@@ -1837,14 +1857,11 @@ end, function(err)
     end
     if err:find("Terminated") then
         c.setTextColor(colors.orange)
-        c.write("Flight control terminated")
-        c.setCursorPos(1, 2)
+        print("Flight control terminated.")
     else
         c.setTextColor(colors.red)
-        c.write("Flight control error:")
-        c.setCursorPos(1, 2)
-        c.write(err)
-        c.setCursorPos(1, 3)
+        print("Flight control error:")
+        print(err)
     end
     c.setTextColor(colors.white)
 end)
