@@ -5,7 +5,8 @@ if not ship then
 end
 if not ship.setStatic then
     if term.isColor() then term.setTextColor(colors.red) end
-    print("ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
+    print(
+        "ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
     return
 end
 
@@ -82,6 +83,7 @@ system.reset = function()
         quadAutoHover = false,
         helicoptAutoHover = false,
         spaceShipLock = false,
+        shipFace = "west",
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
@@ -143,6 +145,42 @@ local function arrayTableRemoveElement(targetTable, value)
     end
 end
 
+local MatrixMultiplication = function(m, v)
+    return {
+        x = m[1][1] * v.x + m[1][2] * v.y,
+        y = m[2][1] * v.x + m[2][2] * v.y
+    }
+end
+
+local create_from_axis_angle = function(xx, yy, zz, a)
+    local q = {}
+    local factor = math.sin(a / 2.0)
+    q.x = xx * factor
+    q.y = yy * factor
+    q.z = zz * factor
+    q.w = math.cos(a / 2.0)
+
+    return q
+end
+
+local getConjQuat = function (q)
+    return {
+        w = q.w,
+        x = -q.x,
+        y = -q.y,
+        z = -q.z,
+    }
+end
+
+function quatMultiply(q1, q2)
+    local newQuat = {}
+    newQuat.w = -q1.x * q2.x - q1.y * q2.y - q1.z * q2.z + q1.w * q2.w
+    newQuat.x = q1.x * q2.w + q1.y * q2.z - q1.z * q2.y + q1.w * q2.x
+    newQuat.y = -q1.x * q2.z + q1.y * q2.w + q1.z * q2.x + q1.w * q2.y
+    newQuat.z = q1.x * q2.y - q1.y * q2.x + q1.z * q2.w + q1.w * q2.z
+    return newQuat
+end
+
 function copysign(num1, num2)
     num1 = math.abs(num1)
     num1 = num2 > 0 and num1 or -num1
@@ -200,9 +238,12 @@ function quat2Euler(quat)
     ag.pitch = math.deg(math.atan2(FPoint.y, copysign(math.sqrt(FPoint.x ^ 2 + FPoint.z ^ 2), TopPoint.y)))
     ag.yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
     ag.roll = math.deg(math.asin(LPoint.y))
+    if math.abs(ag.pitch) > 80 then
+        ag.yaw = -math.deg(math.atan2(LPoint.x, -LPoint.z))
+    end
     if math.abs(ag.pitch) > 90 then
-        ag.yaw = -ag.yaw
         ag.roll = -ag.roll
+        ag.yaw = -ag.yaw
     end
     return ag
 end
@@ -216,10 +257,11 @@ function getEulerByMatrix(matrix)
 end
 
 function getEulerByMatrixLeft(matrix)
-    ag.yaw = math.deg(math.atan2(matrix[3][3], matrix[1][3]))
-    ag.pitch = math.deg(math.atan2(matrix[2][1], matrix[2][2]))
-    ag.roll = math.deg(math.atan2(matrix[2][3], matrix[2][2]))
-    return ag
+    return {
+        yaw = math.deg(math.atan2(matrix[3][3], matrix[1][3])),
+        pitch = math.deg(math.atan2(matrix[2][1], matrix[2][2])),
+        roll = math.deg(math.atan2(matrix[2][3], matrix[2][2]))
+    }
 end
 
 function euler2Quat(roll, yaw, pitch)
@@ -254,9 +296,6 @@ function quat2Axis(q)
     result.x = resetAngelRange(result.x * angle)
     result.y = resetAngelRange(result.y * angle)
     result.z = resetAngelRange(result.z * angle)
-    --result.x = math.deg(math.asin(result.x))
-    --result.y = math.deg(math.asin(result.y))
-    --result.z = math.deg(math.asin(result.z))
     return result
 end
 
@@ -395,10 +434,21 @@ scanner.getCommander = function()
         for k, v in pairs(scanner.entities) do
             if v.name == properties.userName then
                 result = v
-                result.y = result.y + 1.6
-                result.roll = 0
+
                 result.yaw = math.deg(math.atan2(result.raw_euler_z, -result.raw_euler_x))
-                result.pitch = -math.deg(math.asin(result.raw_euler_y))
+                if properties.shipFace == "west" then
+                    result.pitch = -math.deg(math.asin(result.raw_euler_y))
+                    result.roll = 0
+                elseif properties.shipFace == "east" then
+                    result.pitch = math.deg(math.asin(result.raw_euler_y))
+                    result.roll = 0
+                elseif properties.shipFace == "north" then
+                    result.roll = math.deg(math.asin(result.raw_euler_y))
+                    result.pitch = 0
+                elseif properties.shipFace == "south" then
+                    result.roll = -math.deg(math.asin(result.raw_euler_y))
+                    result.pitch = 0
+                end
                 return result
             end
         end
@@ -468,11 +518,18 @@ attUtil = {
     speed = {},
     tmpFlags = {
         spaceShipLastPos = ship.getWorldspacePosition(),
-        spaceShipLastEuler = {roll = 0, yaw = 0, pitch = 0},
-        hmsLastAtt = {roll = 0, yaw = 0, pitch = 0},
+        spaceShipLastEuler = { roll = 0, yaw = 0, pitch = 0 },
+        hmsLastAtt = { roll = 0, yaw = 0, pitch = 0 },
         helicoptLastPos = ship.getWorldspacePosition(),
-        helicoptLastEuler = {roll = 0, yaw = 0, pitch = 0},
+        helicoptLastEuler = { roll = 0, yaw = 0, pitch = 0 },
+        followLastAtt = ship.getWorldspacePosition()
     }
+}
+attUtil.quatList = {
+    west  = { w = -1, x = 0, y = 0, z = 0 },
+    south = { w = -0.70710678118654752440084436210485, x = 0, y = -0.70710678118654752440084436210485, z = 0 },
+    east  = { w = 0, x = 0, y = -1, z = 0 },
+    north = { w = -0.70710678118654752440084436210485, x = 0, y = 0.70710678118654752440084436210485, z = 0 },
 }
 
 attUtil.getAtt = function()
@@ -484,12 +541,8 @@ attUtil.getAtt = function()
 
     attUtil.size = ship.getSize()
     attUtil.position = ship.getWorldspacePosition()
-    attUtil.quat = ship.getQuaternion()
-    attUtil.conjQuat = {}
-    attUtil.conjQuat.w = attUtil.quat.w
-    attUtil.conjQuat.x = -attUtil.quat.x
-    attUtil.conjQuat.y = -attUtil.quat.y
-    attUtil.conjQuat.z = -attUtil.quat.z
+    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], ship.getQuaternion())
+    attUtil.conjQuat = getConjQuat(ship.getQuaternion())
     attUtil.matrix = ship.getRotationMatrix()
     --attUtil.eulerAngle = getEulerByMatrix(attUtil.matrix)
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
@@ -507,7 +560,6 @@ attUtil.getAtt = function()
     attUtil.omega.roll = math.deg(math.asin(ZPoint.y))
     attUtil.omega.pitch = math.deg(math.asin(XPoint.y))
     attUtil.omega.yaw = math.deg(math.atan2(-XPoint.z, XPoint.x))
-
 
     attUtil.eulerOmega.roll = attUtil.eulerAngle.roll - attUtil.preEuler.roll
     attUtil.eulerOmega.yaw = attUtil.eulerAngle.yaw - attUtil.preEuler.yaw
@@ -542,17 +594,21 @@ end
 ---------joyUtil---------
 joyUtil = {
     joy = nil,
-    joyMissing = true,
-    l_fb = 0,
-    l_lr = 0,
-    r_fb = 0,
-    r_lr = 0,
     LB = 0,
     RB = 0,
     LT = 0,
     RT = 0,
     back = 0,
     start = 0,
+    LeftStick = { x = 0, y = 0 },
+    RightStick = { x = 0, y = 0 },
+    BTStick = { x = 0, y = 0 },
+    faceList = {
+        west  = { { 1, 0 }, { 0, 1 } },
+        east  = { { -1, 0 }, { 0, -1 } },
+        south = { { 0, 1 }, { -1, 0 } },
+        north = { { 0, -1 }, { 1, 0 } },
+    },
     flag = false
 }
 
@@ -561,16 +617,15 @@ joyUtil.getJoyInput = function()
         joyUtil.joy = peripheral.find("tweaked_controller")
     end
     if joyUtil.joy then
-        joyUtil.joyMissing = false
         joyUtil.flag = pcall(joyUtil.joy.hasUser)
         if not joyUtil.flag then
             return
         end
         if joyUtil.joy.hasUser() then
-            joyUtil.l_lr = -joyUtil.joy.getAxis(1)
-            joyUtil.l_fb = -joyUtil.joy.getAxis(2)
-            joyUtil.r_lr = -joyUtil.joy.getAxis(3)
-            joyUtil.r_fb = -joyUtil.joy.getAxis(4)
+            joyUtil.LeftStick.x = -joyUtil.joy.getAxis(1)
+            joyUtil.LeftStick.y = -joyUtil.joy.getAxis(2)
+            joyUtil.RightStick.x = -joyUtil.joy.getAxis(3)
+            joyUtil.RightStick.y = -joyUtil.joy.getAxis(4)
             joyUtil.LB = joyUtil.joy.getButton(5)
             joyUtil.RB = joyUtil.joy.getButton(6)
             joyUtil.LT = joyUtil.joy.getAxis(5)
@@ -578,10 +633,10 @@ joyUtil.getJoyInput = function()
             joyUtil.back = joyUtil.joy.getButton(7)
             joyUtil.start = joyUtil.joy.getButton(8)
         else
-            joyUtil.l_lr = 0
-            joyUtil.l_fb = 0
-            joyUtil.r_lr = 0
-            joyUtil.r_fb = 0
+            joyUtil.LeftStick.x = 0
+            joyUtil.LeftStick.y = 0
+            joyUtil.RightStick.x = 0
+            joyUtil.RightStick.y = 0
             joyUtil.LB = 0
             joyUtil.RB = 0
             joyUtil.LT = 0
@@ -592,16 +647,10 @@ joyUtil.getJoyInput = function()
 
         joyUtil.LB = joyUtil.LB and 1 or 0
         joyUtil.RB = joyUtil.RB and 1 or 0
-    else
-        joyUtil.joyMissing = false
-        --[[properties.mode = modelist.spaceShip.name
-        for k, v in pairs(modelist) do
-            if v == modelist.spaceShip then
-                v.flag = true
-            else
-                v.flag = false
-            end
-        end]]
+        joyUtil.BTStick.x = joyUtil.LB - joyUtil.RB
+        joyUtil.BTStick.y = joyUtil.LT - joyUtil.RT
+        joyUtil.RightStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.RightStick)
+        joyUtil.BTStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.BTStick)
     end
 end
 
@@ -668,7 +717,6 @@ pdControl.quadUp = function(yVal, p, d, hov)
 end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
-    --commands.execAsync(("say omegaRoll=%0.8f"):format(attUtil.omega.roll))
     pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
@@ -680,18 +728,17 @@ end
 
 pdControl.rotate2Euler = function(euler, p, d)
     local tgAg, roll, yaw, pitch = {}, 0, 0, 0
-    local selfAg = attUtil.eulerAngle
-    euler.pitch = math.abs(euler.pitch) > 45 and copysign(45, euler.pitch) or euler.pitch
-    tgAg.roll  = resetAngelRange(euler.roll - selfAg.roll)
-    tgAg.yaw   = resetAngelRange(euler.yaw - selfAg.yaw)
-    tgAg.pitch = resetAngelRange(euler.pitch - selfAg.pitch)
+    local selfAg                 = attUtil.eulerAngle
+    tgAg.roll                    = resetAngelRange(euler.roll - selfAg.roll)
+    tgAg.yaw                     = resetAngelRange(euler.yaw - selfAg.yaw)
+    tgAg.pitch                   = resetAngelRange(euler.pitch - selfAg.pitch)
 
-    yaw        = tgAg.yaw * (1 - attUtil.pX.y ^ 2) + -tgAg.roll * (attUtil.pX.y ^ 2)
-    roll       = tgAg.roll * (1 - attUtil.pX.y ^ 2) + tgAg.yaw * (attUtil.pX.y ^ 2)
-    pitch      = tgAg.pitch * (1 - attUtil.pZ.y ^ 2) + tgAg.yaw * (attUtil.pZ.y ^ 2)
-    roll       = roll
-    yaw        = yaw
-    pitch      = pitch
+    yaw                          = tgAg.yaw * (1 - attUtil.pX.y ^ 2) + -tgAg.roll * (attUtil.pX.y ^ 2)
+    roll                         = tgAg.roll * (1 - attUtil.pX.y ^ 2) + tgAg.yaw * (attUtil.pX.y ^ 2)
+    pitch                        = tgAg.pitch * (1 - attUtil.pZ.y ^ 2) + tgAg.yaw * (attUtil.pZ.y ^ 2)
+    roll                         = roll
+    yaw                          = yaw
+    pitch                        = pitch
 
     pdControl.rotInner(roll, yaw, pitch, p, d)
 end
@@ -720,29 +767,32 @@ end
 
 pdControl.spaceShip = function()
     if properties.spaceShipLock then
-        if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then attUtil.tmpFlags.spaceShipLastEuler = attUtil.eulerAngle end
+        if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then
+            attUtil.tmpFlags.spaceShipLastEuler = attUtil
+                .eulerAngle
+        end
         if next(attUtil.tmpFlags.spaceShipLastPos) == nil then attUtil.tmpFlags.spaceShipLastPos = attUtil.position end
         pdControl.gotoPosition(attUtil.tmpFlags.spaceShipLastEuler, attUtil.tmpFlags.spaceShipLastPos)
     else
         pdControl.moveWithRot(
-            math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
-            math.deg(math.asin(joyUtil.l_fb)),
-            math.deg(math.asin(joyUtil.LB - joyUtil.RB)),
+            math.deg(math.asin(joyUtil.BTStick.y)),
+            math.deg(math.asin(joyUtil.LeftStick.y)),
+            math.deg(math.asin(joyUtil.BTStick.x)),
             properties.space_Acc,
             properties.move_D)
     end
 
     pdControl.rotInner(
-        math.deg(math.asin(joyUtil.r_lr)),
-        math.deg(math.asin(joyUtil.l_lr)),
-        math.deg(math.asin(joyUtil.r_fb)),
+        math.deg(math.asin(joyUtil.RightStick.x)),
+        math.deg(math.asin(joyUtil.LeftStick.x)),
+        math.deg(math.asin(joyUtil.RightStick.y)),
         properties.omega_P,
         properties.omega_D)
 end
 
 pdControl.quadFPV = function()
     if properties.quadAutoHover then
-        if joyUtil.l_fb == 0 then
+        if joyUtil.LeftStick.y == 0 then
             pdControl.quadUp(
                 0,
                 properties.quad_Acc,
@@ -750,13 +800,13 @@ pdControl.quadFPV = function()
                 true)
         else
             pdControl.quadUp(
-                math.deg(math.asin(joyUtil.l_fb)),
+                math.deg(math.asin(joyUtil.LeftStick.y)),
                 properties.quad_Acc,
                 properties.move_D,
                 false)
         end
 
-        if joyUtil.r_lr == 0 and joyUtil.l_lr == 0 and joyUtil.r_fb == 0 then
+        if joyUtil.RightStick.x == 0 and joyUtil.LeftStick.x == 0 and joyUtil.RightStick.y == 0 then
             local newVel = {}
             local distance = math.sqrt(attUtil.velocity.x ^ 2 + attUtil.velocity.z ^ 2 + attUtil.velocity.y ^ 2)
             newVel.x = attUtil.velocity.x / distance
@@ -777,23 +827,23 @@ pdControl.quadFPV = function()
             pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
         else
             pdControl.rotate2Euler({
-                    roll = math.deg(math.asin(joyUtil.r_lr)) / 1.5,
-                    yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 40,
-                    pitch = math.deg(math.asin(joyUtil.r_fb) / 1.5)
+                    roll = math.deg(math.asin(joyUtil.RightStick.x)) / 1.5,
+                    yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40,
+                    pitch = math.deg(math.asin(joyUtil.RightStick.y) / 1.5)
                 },
                 properties.omega_P,
                 properties.omega_D)
         end
     else
         pdControl.quadUp(
-            math.deg(math.asin(joyUtil.l_fb)),
+            math.deg(math.asin(joyUtil.LeftStick.y)),
             properties.quad_Acc,
             properties.move_D,
             false)
         pdControl.rotInner(
-            math.deg(math.asin(joyUtil.r_lr)),
-            math.deg(math.asin(joyUtil.l_lr)),
-            math.deg(math.asin(joyUtil.r_fb)),
+            math.deg(math.asin(joyUtil.RightStick.x)),
+            math.deg(math.asin(joyUtil.LeftStick.x)),
+            math.deg(math.asin(joyUtil.RightStick.y)),
             properties.omega_P,
             properties.omega_D)
     end
@@ -819,10 +869,10 @@ pdControl.helicopter = function()
         tgAg.pitch = tgAg.pitch ~= tgAg.pitch and 0 or tgAg.pitch * tmpPos.tmp_c * 0.01
         tgAg.pitch = math.abs(tgAg.pitch) > 45 and copysign(45, tgAg.pitch) or tgAg.pitch
     else
-        acc = math.deg(math.asin(joyUtil.l_fb))
-        tgAg.roll = math.deg(math.asin(joyUtil.r_lr)) * (properties.helicopt_MAX_ANGLE / 90)
-        tgAg.yaw = attUtil.eulerAngle.yaw + joyUtil.l_lr * 40 * properties.helicopt_YAW_P
-        tgAg.pitch = math.deg(math.asin(joyUtil.r_fb)) * (properties.helicopt_MAX_ANGLE / 90)
+        acc = math.deg(math.asin(joyUtil.LeftStick.y))
+        tgAg.roll = math.deg(math.asin(joyUtil.RightStick.x)) * (properties.helicopt_MAX_ANGLE / 90)
+        tgAg.yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40 * properties.helicopt_YAW_P
+        tgAg.pitch = math.deg(math.asin(joyUtil.RightStick.y)) * (properties.helicopt_MAX_ANGLE / 90)
     end
 
     pdControl.quadUp(
@@ -847,8 +897,8 @@ pdControl.gotoPosition = function(euler, pos)
         xVal,
         yVal,
         zVal,
-        properties.space_Acc,
-        properties.move_D
+        2,
+        1.6
     )
     if euler then
         pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
@@ -886,29 +936,27 @@ pdControl.followMouse = function()
     pdControl.rotate2Euler(attUtil.tmpFlags.hmsLastAtt, properties.omega_P, properties.omega_D)
 
     pdControl.moveWithRot(
-        math.deg(math.asin(joyUtil.LT - joyUtil.RT)),
-        math.deg(math.asin(joyUtil.l_fb)),
-        math.deg(math.asin(joyUtil.LB - joyUtil.RB)),
+        math.deg(math.asin(joyUtil.BTStick.y)),
+        math.deg(math.asin(joyUtil.LeftStick.y)),
+        math.deg(math.asin(joyUtil.BTStick.x)),
         properties.space_Acc,
         properties.move_D)
 end
 
 pdControl.follow = function(target)
-    if not target then
-        -- TODO:插入悬停飞控
-        -- pdControl.staticHover()
-        return
+    if target then
+        local pos, qPos = {}, {}
+        qPos.x = copysign(attUtil.size.x / 2, properties.followRange.x) + properties.followRange.x
+        qPos.y = copysign(attUtil.size.y / 2, properties.followRange.y) + properties.followRange.y
+        qPos.z = copysign(attUtil.size.z / 2, properties.followRange.z) + properties.followRange.z
+        pos.x = target.x + qPos.x
+        pos.y = target.y + qPos.y
+        pos.z = target.z + qPos.z
+        attUtil.tmpFlags.followLastAtt = pos
     end
-    local pos, qPos = {}, {}
-    qPos.x = copysign(attUtil.size.x / 2, properties.followRange.x) + properties.followRange.x
-    qPos.y = copysign(attUtil.size.y / 2, properties.followRange.y) + properties.followRange.y
-    qPos.z = copysign(attUtil.size.z / 2, properties.followRange.z) + properties.followRange.z
-    pos.x = target.x + qPos.x
-    pos.y = target.y + qPos.y
-    pos.z = target.z + qPos.z
 
     pdControl.gotoPosition(
-        { roll = 0, yaw = 0, pitch = 0 }, pos)
+        { roll = 0, yaw = 0, pitch = 0 }, attUtil.tmpFlags.followLastAtt)
 end
 
 pdControl.pointLoop = function()
@@ -1004,10 +1052,17 @@ function flightGizmoScreen:init()
         User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
         HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
         Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false },
+        SET_ATT     = { y = 8, name = "Set_Att    ", selected = false, flag = false },
     }
     self.attPage = {
         compass = { name = "compass", flag = true },
         level = { name = "level", flag = false }
+    }
+    self.faceList = {
+        { name = "west",  x = 3,  y = 6 },
+        { name = "north", x = 8,  y = 4 },
+        { name = "east",  x = 13, y = 6 },
+        { name = "south", x = 8,  y = 8 }
     }
 end
 
@@ -1186,10 +1241,8 @@ function flightGizmoScreen:refresh()
         elseif self.settingPage.User_Change.flag then
             self.monitor.setCursorPos(1, 2)
             self.monitor.blit("<<", "24", "33")
-
             self.monitor.setCursorPos(2, 3)
             self.monitor.blit("selectUser:", "fffffffffff", "33333333333")
-
             for i = 1, 5, 1 do
                 if scanner.playerList[i] then
                     local name = scanner.playerList[i].name
@@ -1232,6 +1285,19 @@ function flightGizmoScreen:refresh()
             self.monitor.blit("0_Point-    +", "fffffffffffff", "3333333b3333e")
             self.monitor.setCursorPos(10, 8)
             self.monitor.write(string.format("%0.1f", properties.ZeroPoint))
+        elseif self.settingPage.SET_ATT.flag then
+            self.monitor.setCursorPos(1, 2)
+            self.monitor.blit("<<", "24", "33")
+
+            for k, v in pairs(self.faceList) do
+                if v.name == properties.shipFace then
+                    self.monitor.setCursorPos(v.x, v.y)
+                    self.monitor.blit(string.sub(v.name, 1, 1), "f", "4")
+                else
+                    self.monitor.setCursorPos(v.x, v.y)
+                    self.monitor.blit(string.sub(v.name, 1, 1), "7", "3")
+                end
+            end
         else
             for key, value in pairs(self.settingPage) do
                 self.monitor.setCursorPos(2, value.y)
@@ -1433,6 +1499,17 @@ function flightGizmoScreen:onTouch(x, y)
                     if properties.ZeroPoint < 0 then
                         properties.ZeroPoint = properties.ZeroPoint + 0.1
                     end
+                end
+            end
+        elseif self.settingPage.SET_ATT.flag then
+            if y == 2 and x < 3 then
+                self.settingPage.SET_ATT.flag = false
+                system.updatePersistentData()
+            end
+
+            for k, v in pairs(self.faceList) do
+                if x == v.x and y == v.y then
+                    properties.shipFace = v.name
                 end
             end
         else
