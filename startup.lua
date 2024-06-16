@@ -12,12 +12,12 @@ end
 
 ---------inner---------
 local modelist = {
-    spaceShip = { y = 3, name = "spaceShip ", flag = false },
-    quadFPV   = { y = 4, name = "quadFPV   ", flag = false },
-    helicopt  = { y = 5, name = "helicopter", flag = false },
-    hms_fly   = { y = 6, name = "hms_fly   ", flag = false },
-    follow    = { y = 7, name = "follow    ", flag = false },
-    pointLoop = { y = 8, name = "pointLoop ", flag = false }
+    { y = 3, name = "spaceShip ", flag = false, lock = false },
+    { y = 4, name = "quadFPV   ", flag = false, lock = false },
+    { y = 5, name = "helicopter", flag = false, lock = false },
+    { y = 6, name = "hms_fly   ", flag = false },
+    { y = 7, name = "follow    ", flag = false },
+    { y = 8, name = "pointLoop ", flag = false }
 }
 
 local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil
@@ -25,7 +25,8 @@ local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, s
 ---------system---------
 system = {
     fileName = "dat",
-    file = nil
+    file = nil,
+    modeIndex = 0,
 }
 
 system.init = function()
@@ -50,6 +51,12 @@ system.init = function()
             value.flag = true
         end
     end
+
+    for k, v in pairs(modelist) do
+        if properties.mode == v.name then
+            system.modeIndex = v.y - 2
+        end
+    end
 end
 
 system.reset = function()
@@ -60,7 +67,7 @@ system.reset = function()
     end
     return {
         userName = "fashaodesu",
-        mode = modelist.quadFPV.name,
+        mode = modelist[2].name,
         HOME = { x = 0, y = 120, z = 0 },
         homeList = {
             { x = 0, y = 120, z = 0 }
@@ -80,9 +87,6 @@ system.reset = function()
         MAX_MOVE_SPEED = 99,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
         pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
         rayCasterRange = 128,
-        quadAutoHover = false,
-        helicoptAutoHover = false,
-        spaceShipLock = false,
         shipFace = "west",
         quadGravity = -1,
         airMass = 1,                            --空气密度 (风阻)
@@ -163,7 +167,7 @@ local create_from_axis_angle = function(xx, yy, zz, a)
     return q
 end
 
-local getConjQuat = function (q)
+local getConjQuat = function(q)
     return {
         w = q.w,
         x = -q.x,
@@ -585,10 +589,17 @@ attUtil.init = function()
     attUtil.position = ship.getWorldspacePosition()
     attUtil.prePos = attUtil.position
     attUtil.velocity = { x = 0, y = 0, z = 0 }
-    attUtil.quat = ship.getQuaternion()
+    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], ship.getQuaternion())
     attUtil.preQuat = attUtil.quat
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
     attUtil.preEuler = { roll = 0, yaw = 0, pitch = 0 }
+end
+
+attUtil.setLastPos = function()
+    attUtil.tmpFlags.spaceShipLastPos = attUtil.position
+    attUtil.tmpFlags.spaceShipLastEuler = attUtil.eulerAngle
+    attUtil.tmpFlags.helicoptLastPos = attUtil.position
+    attUtil.tmpFlags.helicoptLastEuler = attUtil.eulerAngle
 end
 
 ---------joyUtil---------
@@ -609,8 +620,17 @@ joyUtil = {
         south = { { 0, 1 }, { -1, 0 } },
         north = { { 0, -1 }, { 1, 0 } },
     },
+    up = false,
+    down = false,
+    right = false,
+    left = false,
+    cd = 0,
     flag = false
 }
+
+joyUtil.init = function()
+
+end
 
 joyUtil.getJoyInput = function()
     if not joyUtil.joy or not peripheral.hasType(joyUtil.joy, "tweaked_controller") then
@@ -632,6 +652,10 @@ joyUtil.getJoyInput = function()
             joyUtil.RT = joyUtil.joy.getAxis(6)
             joyUtil.back = joyUtil.joy.getButton(7)
             joyUtil.start = joyUtil.joy.getButton(8)
+            joyUtil.up = joyUtil.joy.getButton(12)
+            joyUtil.down = joyUtil.joy.getButton(14)
+            joyUtil.left = joyUtil.joy.getButton(15)
+            joyUtil.right = joyUtil.joy.getButton(13)
         else
             joyUtil.LeftStick.x = 0
             joyUtil.LeftStick.y = 0
@@ -643,6 +667,9 @@ joyUtil.getJoyInput = function()
             joyUtil.RT = 0
             joyUtil.back = 0
             joyUtil.start = 0
+            joyUtil.up = false
+            joyUtil.down = false
+            joyUtil.right = false
         end
 
         joyUtil.LB = joyUtil.LB and 1 or 0
@@ -651,6 +678,33 @@ joyUtil.getJoyInput = function()
         joyUtil.BTStick.y = joyUtil.LT - joyUtil.RT
         joyUtil.RightStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.RightStick)
         joyUtil.BTStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.BTStick)
+
+        if joyUtil.cd < 1 then
+            if joyUtil.up or joyUtil.down then
+                if joyUtil.up then
+                    system.modeIndex = system.modeIndex > 1 and system.modeIndex - 1 or #modelist
+                elseif joyUtil.down then
+                    system.modeIndex = system.modeIndex < #modelist and system.modeIndex + 1 or 1
+                end
+                for i = 1, #modelist, 1 do
+                    if i == system.modeIndex then
+                        modelist[i].flag = true
+                    else
+                        modelist[i].flag = false
+                    end
+                end
+                attUtil.setLastPos()
+                properties.mode = modelist[system.modeIndex].name
+                joyUtil.cd = 4
+            elseif joyUtil.right or joyUtil.left then
+                if system.modeIndex < 4 then
+                    modelist[system.modeIndex].lock = not modelist[system.modeIndex].lock
+                    attUtil.setLastPos()
+                end
+                joyUtil.cd = 4
+            end
+        end
+        joyUtil.cd = joyUtil.cd > 0 and joyUtil.cd - 1 or 0
     end
 end
 
@@ -766,12 +820,9 @@ pdControl.rotate2Euler2 = function(euler)
 end
 
 pdControl.spaceShip = function()
-    if properties.spaceShipLock then
-        if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then
-            attUtil.tmpFlags.spaceShipLastEuler = attUtil
-                .eulerAngle
-        end
-        if next(attUtil.tmpFlags.spaceShipLastPos) == nil then attUtil.tmpFlags.spaceShipLastPos = attUtil.position end
+    if modelist[1].lock then
+        if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then attUtil.setLastPos() end
+        if next(attUtil.tmpFlags.spaceShipLastPos) == nil then attUtil.setLastPos() end
         pdControl.gotoPosition(attUtil.tmpFlags.spaceShipLastEuler, attUtil.tmpFlags.spaceShipLastPos)
     else
         pdControl.moveWithRot(
@@ -791,7 +842,7 @@ pdControl.spaceShip = function()
 end
 
 pdControl.quadFPV = function()
-    if properties.quadAutoHover then
+    if modelist[2].lock then
         if joyUtil.LeftStick.y == 0 then
             pdControl.quadUp(
                 0,
@@ -852,7 +903,7 @@ end
 pdControl.helicopter = function()
     local acc
     local tgAg = {}
-    if properties.helicoptAutoHover then
+    if modelist[3].lock then
         local tmpPos = {}
         tmpPos.y = attUtil.tmpFlags.helicoptLastPos.y - (attUtil.position.y + attUtil.velocity.y * 20)
         acc = tmpPos.y * 10
@@ -1121,28 +1172,28 @@ function flightGizmoScreen:refresh()
             end
         end
 
-        if properties.mode == modelist.spaceShip.name then
-            self.monitor.setCursorPos(12, modelist.spaceShip.y)
-            if properties.spaceShipLock then
+        if properties.mode == modelist[1].name then
+            self.monitor.setCursorPos(12, modelist[1].y)
+            if modelist[1].lock then
                 self.monitor.blit(" L", "ff", "33")
             else
                 self.monitor.blit(" N", "88", "33")
             end
         end
 
-        if properties.mode == modelist.helicopt.name then
-            self.monitor.setCursorPos(12, modelist.helicopt.y)
-            if properties.helicoptAutoHover then
-                self.monitor.blit(" L", "ff", "33")
-            else
-                self.monitor.blit(" N", "88", "33")
-            end
-        end
-
-        if properties.mode == modelist.quadFPV.name then
-            self.monitor.setCursorPos(12, modelist.quadFPV.y)
-            if properties.quadAutoHover then
+        if properties.mode == modelist[2].name then
+            self.monitor.setCursorPos(12, modelist[2].y)
+            if modelist[2].lock then
                 self.monitor.blit(" A", "ff", "33")
+            else
+                self.monitor.blit(" N", "88", "33")
+            end
+        end
+
+        if properties.mode == modelist[3].name then
+            self.monitor.setCursorPos(12, modelist[3].y)
+            if modelist[3].lock then
+                self.monitor.blit(" L", "ff", "33")
             else
                 self.monitor.blit(" N", "88", "33")
             end
@@ -1182,7 +1233,7 @@ function flightGizmoScreen:refresh()
         end
     elseif self.mainPage.settings.flag then --settingPage
         if self.settingPage.PD_Tuning.flag then
-            properties.spaceShipLock = false
+            modelist[1].lock = false
             self.monitor.setCursorPos(1, 2)
             self.monitor.blit("<<", "24", "33")
 
@@ -1336,22 +1387,23 @@ function flightGizmoScreen:onTouch(x, y)
                     if value.y == y then
                         value.flag = true
                         properties.mode = value.name
+                        if value.name == modelist[1].name or value.name == modelist[3].name then
+                            attUtil.setLastPos()
+                        end
                     else
                         value.flag = false
                     end
                 end
             end
         else
-            if y == modelist.spaceShip.y then
-                attUtil.tmpFlags.spaceShipLastPos = attUtil.position
-                attUtil.tmpFlags.spaceShipLastEuler = attUtil.eulerAngle
-                properties.spaceShipLock = not properties.spaceShipLock
-            elseif y == modelist.helicopt.y then
-                attUtil.tmpFlags.helicoptLastPos = attUtil.position
-                attUtil.tmpFlags.helicoptLastEuler = attUtil.eulerAngle
-                properties.helicoptAutoHover = not properties.helicoptAutoHover
-            elseif y == modelist.quadFPV.y then
-                properties.quadAutoHover = not properties.quadAutoHover
+            if y == modelist[1].y then
+                attUtil.setLastPos()
+                modelist[1].lock = not modelist[1].lock
+            elseif y == modelist[3].y then
+                attUtil.setLastPos()
+                modelist[3].lock = not modelist[3].lock
+            elseif y == modelist[2].y then
+                modelist[2].lock = not modelist[2].lock
             end
         end
     elseif self.mainPage.settings.flag then
@@ -1866,23 +1918,18 @@ end
 function flightUpdate()
     if ship.isStatic() then
         --static
-    elseif properties.mode == modelist.spaceShip.name then
+    elseif properties.mode == modelist[1].name then
         pdControl.spaceShip()
-    elseif properties.mode == modelist.quadFPV.name then
+    elseif properties.mode == modelist[2].name then
         pdControl.quadFPV()
-    elseif properties.mode == modelist.helicopt.name then
+    elseif properties.mode == modelist[3].name then
         pdControl.helicopter()
-    elseif properties.mode == modelist.hms_fly.name then
+    elseif properties.mode == modelist[4].name then
         pdControl.followMouse()
-    elseif properties.mode == modelist.follow.name then
+    elseif properties.mode == modelist[5].name then
         pdControl.follow(scanner.commander)
-    elseif properties.mode == modelist.pointLoop.name then
+    elseif properties.mode == modelist[6].name then
         pdControl.pointLoop()
-    elseif properties.mode == modelist.auto.name then
-        pdControl.gotoPosition(
-            { roll = 0, yaw = 120, pitch = 80 },
-            properties.HOME
-        )
     end
 end
 
