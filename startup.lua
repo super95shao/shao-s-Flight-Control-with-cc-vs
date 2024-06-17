@@ -620,6 +620,12 @@ joyUtil = {
         south = { { 0, 1 }, { -1, 0 } },
         north = { { 0, -1 }, { 1, 0 } },
     },
+    faceListLeft = {
+        west  = { { 1, 0 }, { 0, 1 } },
+        east  = { { -1, 0 }, { 0, -1 } },
+        south = { { 0, -1 }, { 1, 0 } },
+        north = { { 0, 1 }, { -1, 0 } },
+    },
     up = false,
     down = false,
     right = false,
@@ -677,7 +683,7 @@ joyUtil.getJoyInput = function()
         joyUtil.BTStick.x = joyUtil.LB - joyUtil.RB
         joyUtil.BTStick.y = joyUtil.LT - joyUtil.RT
         joyUtil.RightStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.RightStick)
-        joyUtil.BTStick = MatrixMultiplication(joyUtil.faceList[properties.shipFace], joyUtil.BTStick)
+        joyUtil.BTStick = MatrixMultiplication(joyUtil.faceListLeft[properties.shipFace], joyUtil.BTStick)
 
         if joyUtil.cd < 1 then
             if joyUtil.up or joyUtil.down then
