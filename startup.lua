@@ -39,6 +39,8 @@ logger.logError = function(text)
     })
 end
 
+local screenWarning
+
 ---------inner---------
 local modelist = {
     { y = 3, name = "spaceShip ", flag = false, lock = false },
@@ -50,7 +52,7 @@ local modelist = {
 }
 
 local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil
-local physics_flag = true
+local on_physics_ticks = false
 
 ---------system---------
 system = {
@@ -103,6 +105,7 @@ system.reset = function()
             { x = 0, y = 120, z = 0 }
         },
         enabledMonitors = enabledMonitors,
+        lastGizmo = {},
         omega_P = 1,    --角速度比例, 决定转向快慢
         omega_D = 2.52, --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
         space_Acc = 2,  --星舰模式油门速度
@@ -765,15 +768,26 @@ pdControl = {
     zSpeed = 0,
     fixCd = 0,
     pointLoopIndex = 1,
-    basicYSpeed = 10,
-    helicopt_P_multiply = 1,
-    helicopt_D_multiply = 1,
-    rot_P_multiply = 1,
-    rot_D_multiply = 1,
-    move_P_multiply = 1,
+    basicYSpeed = 30,
+    helicopt_P_multiply = 1.5,
+    helicopt_D_multiply = 4,
+    rot_P_multiply = 1.5,
+    rot_D_multiply = 0.5,
+    move_P_multiply = 2,
     move_D_multiply = 100,
-    airMass_multiply = 10
+    airMass_multiply = 20,
 }
+
+pdControl.usePTickMode = function()
+    pdControl.basicYSpeed = 10
+    pdControl.helicopt_P_multiply = 1
+    pdControl.helicopt_D_multiply = 1
+    pdControl.rot_P_multiply = 1
+    pdControl.rot_D_multiply = 1
+    pdControl.move_P_multiply = 1
+    pdControl.move_D_multiply = 100
+    pdControl.airMass_multiply = 10
+end
 
 pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
     p = p * pdControl.move_P_multiply
@@ -1096,7 +1110,7 @@ pdControl.pointLoop = function()
         tgAg, pos)
 end
 ---------screens---------
-local abstractScreen, flightGizmoScreen, debugScreen, logScreen, screensManagerScreen, screenPickerScreen, loadingScreen
+local abstractScreen, flightGizmoPickerScreen, flightGizmoAbstractScreen, flightGizmoModScreen, flightGizmoAttScreen, flightGizmoSetScreen, debugScreen, logScreen, screensManagerScreen, screenPickerScreen, loadingScreen
 
 -- abstractScreen
 -- 空屏幕，所有其他屏幕类的基类
@@ -1144,58 +1158,19 @@ end
 
 function abstractScreen:report() end
 
--- flightGizmoScreen
--- 飞控系统屏幕
-flightGizmoScreen = {
+-- flightGizmoAbstractScreen
+-- 飞控屏幕基类
+flightGizmoAbstractScreen = {
     screenTitle = "gizmo"
 }
-flightGizmoScreen.__index = setmetatable(flightGizmoScreen, abstractScreen)
+flightGizmoAbstractScreen.__index = setmetatable(flightGizmoAbstractScreen, abstractScreen)
 
-function flightGizmoScreen:init()
-    if self.monitor.setTextScale then
-        self.monitor.setTextScale(0.5)
-    end
-    self.monitor.setBackgroundColor(colors.black)
-    self.mainIndex = 1
-    self.mainPage = {
-        { name = "  <<  MOD  >>  ", flag = true },
-        { name = "  <<  ATT  >>  ", flag = false },
-        { name = "  <<  SET  >>  ", flag = false }
-    }
-    self.settingPage = {
-        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
-        helicopter  = { y = 4, name = "Helicopter ", selected = false, flag = false },
-        User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
-        HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
-        Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false },
-        SET_ATT     = { y = 8, name = "Set_Att    ", selected = false, flag = false },
-    }
-    self.attPageList = {
-        compass = { name = "compass", flag = true },
-        level = { name = "level", flag = false }
-    }
-    self.faceList = {
-        { name = "west",  x = 3,  y = 6 },
-        { name = "north", x = 8,  y = 4 },
-        { name = "east",  x = 13, y = 6 },
-        { name = "south", x = 8,  y = 8 }
-    }
+function flightGizmoAbstractScreen:init()
+    error("attempting to initialize an abstract screen class")
 end
 
-function flightGizmoScreen:report()
-    if self.mainPage[1].flag then
-        return "Tab: MOD"
-    elseif self.mainPage[2].flag then
-        return "Tab: ATT"
-    elseif self.mainPage[3].flag then
-        return "Tab: SET"
-    else
-        return "Tab: ?"
-    end
-end
-
-function flightGizmoScreen:refresh()
-    if coordinate and not scanner.commander then
+function flightGizmoAbstractScreen:refresh()
+    --[[if coordinate and not scanner.commander then
         for k, v in pairs(self.mainPage) do
             if v == self.mainPage[3] then
                 scanner.scanPlayer()
@@ -1211,213 +1186,192 @@ function flightGizmoScreen:refresh()
                 v.flag = false
             end
         end
-    end
+    end]]
     self.monitor.clear()
-
-    for key, value in pairs(self.mainPage) do
-        self.monitor.setCursorPos(1, 1)
-        if value.flag then
-            self.monitor.blit(value.name, "ffaa2222222aaff", "fffffffffffffff")
-        end
-    end
-
-    if self.mainPage[1].flag then --modePage
-        if not physics_flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("*", "4", "f")
-        end
-        if ship.isStatic() then
-            self.monitor.setCursorPos(4, 2)
-            self.monitor.blit("[STATIC!]", "eeeeeeeee", "111111111")
-        end
-        for key, mode in pairs(modelist) do
-            self.monitor.setCursorPos(2, mode.y)
-            if mode.flag then
-                self.monitor.blit(mode.name, "ffffffffff", "aaaaaaaaaa")
-            else
-                self.monitor.blit(mode.name, "8888888888", "ffffffffff")
-            end
-        end
-
-        if properties.mode == modelist[1].name then
-            self.monitor.setCursorPos(12, modelist[1].y)
-            if modelist[1].lock then
-                self.monitor.blit(" L", "22", "ff")
-            else
-                self.monitor.blit(" N", "88", "ff")
-            end
-        end
-
-        if properties.mode == modelist[2].name then
-            self.monitor.setCursorPos(12, modelist[2].y)
-            if modelist[2].lock then
-                self.monitor.blit(" A", "22", "ff")
-            else
-                self.monitor.blit(" N", "88", "ff")
-            end
-        end
-
-        if properties.mode == modelist[3].name then
-            self.monitor.setCursorPos(12, modelist[3].y)
-            if modelist[3].lock then
-                self.monitor.blit(" L", "22", "ff")
-            else
-                self.monitor.blit(" N", "88", "ff")
-            end
-        end
-    elseif self.mainPage[2].flag then     --attPage
-        self:attPage()
-    elseif self.mainPage[3].flag then --settingPage
-        if self.settingPage.PD_Tuning.flag then
-            modelist[1].lock = false
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("P: --      ++", "100ffffffffff", "fffb5ffffff1e")
-            self.monitor.setCursorPos(8, 3)
-            self.monitor.write(string.format("%0.2f", properties.omega_P))
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("D: --      ++", "900ffffffffff", "fffb5ffffff1e")
-            self.monitor.setCursorPos(8, 4)
-            self.monitor.write(string.format("%0.2f", properties.omega_D))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("spaceAcc-   +", "00000000f000f", "ffffffffbfffe")
-            self.monitor.setCursorPos(11, 6)
-            self.monitor.write(string.format("%0.1f", properties.space_Acc))
-
-            self.monitor.setCursorPos(2, 7)
-            self.monitor.blit("quad_Acc-   +", "00000000f000f", "ffffffffbfffe")
-            self.monitor.setCursorPos(11, 7)
-            self.monitor.write(string.format("%0.1f", properties.quad_Acc))
-
-            self.monitor.setCursorPos(2, 8)
-            self.monitor.blit("MOVE_D: -   +", "00000000f000f", "ffffffffbfffe")
-            self.monitor.setCursorPos(11, 8)
-            self.monitor.write(string.format("%0.1f", properties.move_D))
-        elseif self.settingPage.helicopter.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("Yaw_P--    ++", "00000ff0000ff", "fffffb5ffff1e")
-            self.monitor.setCursorPos(9, 3)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_YAW_P))
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("Rot_P--    ++", "00000ff0000ff", "fffffb5ffff1e")
-            self.monitor.setCursorPos(9, 4)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_P))
-
-            self.monitor.setCursorPos(2, 5)
-            self.monitor.blit("Rot_D--    ++", "00000ff0000ff", "fffffb5ffff1e")
-            self.monitor.setCursorPos(9, 5)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_D))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("ACC:-   +", "0000fffff", "ffffbfffe")
-            self.monitor.setCursorPos(7, 6)
-            self.monitor.write(string.format("%0.1f", properties.helicopt_ACC))
-
-            self.monitor.setCursorPos(2, 7)
-            self.monitor.blit("Acc_D--    ++", "00000ff0000ff", "fffffb5ffff1e")
-            self.monitor.setCursorPos(9, 7)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_ACC_D))
-
-            self.monitor.setCursorPos(2, 8)
-            self.monitor.blit("MaxAngle:-  +", "000000000f00f", "fffffffffbffe")
-            self.monitor.setCursorPos(12, 8)
-            self.monitor.write(string.format("%d", properties.helicopt_MAX_ANGLE))
-        elseif self.settingPage.User_Change.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("selectUser:", "88888888888", "fffffffffff")
-            for i = 1, 5, 1 do
-                if scanner.playerList[i] then
-                    local name = scanner.playerList[i].name
-                    self.monitor.setCursorPos(2, 3 + i)
-                    if name == properties.userName then
-                        for j = 1, 10, 1 do
-                            local tmpChar = name:sub(j, j)
-                            if #tmpChar ~= 0 then
-                                self.monitor.blit(tmpChar, "f", "2")
-                            end
-                        end
-                    else
-                        for j = 1, 10, 1 do
-                            local tmpChar = name:sub(j, j)
-                            if #tmpChar ~= 0 then
-                                self.monitor.blit(tmpChar, "8", "f")
-                            end
-                        end
-                    end
-                end
-            end
-        elseif self.settingPage.HOME_SET.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-        elseif self.settingPage.Simulate.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("AirMass-    +", "0000000f0000f", "fffffffbffffe")
-            self.monitor.setCursorPos(10, 4)
-            self.monitor.write(string.format("%0.1f", properties.airMass))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("Gravity-    +", "0000000f0000f", "fffffffbffffe")
-            self.monitor.setCursorPos(10, 6)
-            self.monitor.write(string.format("%0.1f", properties.quadGravity))
-
-            self.monitor.setCursorPos(2, 8)
-            self.monitor.blit("0_Point-    +", "0000000f0000f", "fffffffbffffe")
-            self.monitor.setCursorPos(10, 8)
-            self.monitor.write(string.format("%0.1f", properties.ZeroPoint))
-        elseif self.settingPage.SET_ATT.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "ff")
-
-            for k, v in pairs(self.faceList) do
-                if v.name == properties.shipFace then
-                    self.monitor.setCursorPos(v.x, v.y)
-                    self.monitor.blit(string.sub(v.name, 1, 1), "f", "e")
-                else
-                    self.monitor.setCursorPos(v.x, v.y)
-                    self.monitor.blit(string.sub(v.name, 1, 1), "8", "f")
-                end
-            end
-        else
-            for key, value in pairs(self.settingPage) do
-                self.monitor.setCursorPos(2, value.y)
-                if value.selected then
-                    self.monitor.blit(value.name, "fffffffffff", "aaaaaaaaaaa")
-                else
-                    self.monitor.blit(value.name, "88888888888", "fffffffffff")
-                end
-            end
-        end
-    end
-
-    --reboot and shutdown
+    --title, reboot and shutdown
+    self.monitor.setCursorPos(1, 1)
+    self.monitor.blit("  <<       >>  ", "ffaa2222222aaff", "fffffffffffffff")
+    self.monitor.setCursorPos(9 - math.ceil(#self.gizmoTitle / 2), 1)
+    self.monitor.write(self.gizmoTitle)
     self.monitor.setCursorPos(1, 10)
-    self.monitor.blit("[|]", "eee", "fff")
-    self.monitor.blit("[R]", "bbb", "fff")
-    self.monitor.setCursorPos(13, 10)
-    self.monitor.blit("[X]", "888", "fff")
+    --self.monitor.blit("[|][R]      [X]", "eeebbb222222888", "fffffffffffffff")
+    self.monitor.blit("[|]         [R]", "eee222222222bbb", "fffffffffffffff")
+    if screenWarning then
+        self.monitor.setCursorPos(4, 10)
+        self.monitor.setTextColor(colors.orange)
+        self.monitor.write(screenWarning)
+        self.monitor.setTextColor(colors.white)
+    end
+    if self.name == "computer" then
+        self.monitor.setCursorPos(1, 11)
+        self.monitor.blit("[<]", "eee", "fff")
+    end
 end
 
-function flightGizmoScreen:attPage()
+function flightGizmoAbstractScreen:onTouch(x, y)
+    if y == 1 then
+        if x <= 6 then
+            if self.gizmoLink.prev then
+                properties.lastGizmo[self.name] = self.gizmoLink.prev
+                system.updatePersistentData()
+                monitorUtil.newScreen(self.name, flightGizmoPickerScreen)
+            end
+            return true
+        elseif x >= 10 then
+            if self.gizmoLink.next then
+                properties.lastGizmo[self.name] = self.gizmoLink.next
+                system.updatePersistentData()
+                monitorUtil.newScreen(self.name, flightGizmoPickerScreen)
+            end
+            return true
+        end
+    end
+    if y == 10 then
+        if x <= 3 then
+            system.updatePersistentData()
+            monitorUtil.blankAllScreens()
+            os.shutdown()
+            return true
+        elseif x >= 13 then
+            system.updatePersistentData()
+            monitorUtil.blankAllScreens()
+            os.reboot()
+            return true
+        end
+    end
+    if y == 11 and x <= 3 and self.name == "computer" then
+        monitorUtil.disconnect(self.name)
+        return true
+    end
+end
+
+-- flightGizmoModScreen
+-- 飞控仪表（模式）屏幕
+flightGizmoModScreen = {
+    screenTitle = "gizmo:mod",
+    gizmoTitle = "MOD"
+}
+flightGizmoModScreen.__index = setmetatable(flightGizmoModScreen, abstractScreen)
+
+function flightGizmoModScreen:init()
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(0.5)
+    end
+    self.monitor.setBackgroundColor(colors.black)
+    self.gizmoLink = {
+        prev = "set",
+        this = "mod",
+        next = "att",
+    }
+end
+
+function flightGizmoModScreen:refresh()
+    flightGizmoAbstractScreen.refresh(self)
+    if on_physics_ticks then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("*", "4", "f")
+    end
+    for key, mode in pairs(modelist) do
+        self.monitor.setCursorPos(2, mode.y)
+        if mode.flag then
+            self.monitor.blit(mode.name, "ffffffffff", "aaaaaaaaaa")
+        else
+            self.monitor.blit(mode.name, "8888888888", "ffffffffff")
+        end
+    end
+
+    if properties.mode == modelist[1].name then
+        self.monitor.setCursorPos(12, modelist[1].y)
+        if modelist[1].lock then
+            self.monitor.blit(" L", "22", "ff")
+        else
+            self.monitor.blit(" N", "88", "ff")
+        end
+    end
+
+    if properties.mode == modelist[2].name then
+        self.monitor.setCursorPos(12, modelist[2].y)
+        if modelist[2].lock then
+            self.monitor.blit(" A", "22", "ff")
+        else
+            self.monitor.blit(" N", "88", "ff")
+        end
+    end
+
+    if properties.mode == modelist[3].name then
+        self.monitor.setCursorPos(12, modelist[3].y)
+        if modelist[3].lock then
+            self.monitor.blit(" L", "22", "ff")
+        else
+            self.monitor.blit(" N", "88", "ff")
+        end
+    end
+end
+
+function flightGizmoModScreen:onTouch(x, y)
+    if flightGizmoAbstractScreen.onTouch(self, x, y) then
+        return
+    end
+    if x < 12 then
+        if y >= 3 and y <= 8 then
+            for key, value in pairs(modelist) do
+                if value.y == y then
+                    value.flag = true
+                    properties.mode = value.name
+                    if value.name == modelist[1].name or value.name == modelist[3].name then
+                        attUtil.setLastPos()
+                    end
+                else
+                    value.flag = false
+                end
+            end
+        end
+    else
+        if y == modelist[1].y then
+            attUtil.setLastPos()
+            modelist[1].lock = not modelist[1].lock
+        elseif y == modelist[3].y then
+            attUtil.setLastPos()
+            modelist[3].lock = not modelist[3].lock
+        elseif y == modelist[2].y then
+            modelist[2].lock = not modelist[2].lock
+        end
+    end
+end
+
+-- flightGizmoAttScreen
+-- 飞控仪表（姿态仪）屏幕
+flightGizmoAttScreen = {
+    screenTitle = "gizmo:att",
+    gizmoTitle = "ATT"
+}
+flightGizmoAttScreen.__index = setmetatable(flightGizmoAttScreen, abstractScreen)
+
+function flightGizmoAttScreen:init()
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(0.5)
+    end
+    self.gizmoLink = {
+        prev = "mod",
+        this = "att",
+        next = "set",
+    }
+    self.monitor.setBackgroundColor(colors.black)
+    self.attPageList = {
+        compass = { name = "compass", flag = true },
+        level = { name = "level", flag = false }
+    }
+end
+
+function flightGizmoAttScreen:refresh()
+    flightGizmoAbstractScreen.refresh(self)
     if self.attPageList.compass.flag then --罗盘
         self.monitor.setCursorPos(1, 2)
         for i = 1, 15, 1 do
             self.monitor.setCursorPos(i, 2)
             self.monitor.blit(".", "8", "f")
         end
-    
+
         local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
         local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
         if attUtil.pX.x > 0 then
@@ -1427,7 +1381,7 @@ function flightGizmoScreen:attPage()
             self.monitor.setCursorPos(8 - zPoint, 2)
             self.monitor.blit("E", "0", "f")
         end
-    
+
         if attUtil.pX.z > 0 then
             self.monitor.setCursorPos(8 + xPoint, 2)
             self.monitor.blit("N", "e", "f")
@@ -1478,262 +1432,400 @@ function flightGizmoScreen:attPage()
             self.monitor.blit("v", "0", "f")
         end
 
-        self.monitor.setCursorPos(7, 4)
-        self.monitor.blit(("yaw"):format(), "fff", "bbb")
-        self.monitor.setCursorPos(6, 5)
-        self.monitor.write(formatN(attUtil.eulerAngle.yaw, 1))
-
+        --self.monitor.setCursorPos(7, 4)
+        --self.monitor.blit("yaw", "fff", "bbb")
+        self.monitor.setCursorPos(8, 3)
+        self.monitor.write("^")
+        self.monitor.setCursorPos(5, 4)
+        self.monitor.write(("%6.1f"):format(attUtil.eulerAngle.yaw))
     elseif self.attPageList.level.flag then --水平仪
     end
 end
 
-function flightGizmoScreen:onTouch(x, y)
-    if y < 2 then
-        if x < 7 or x > 10 then
-            self.mainPage[self.mainIndex].flag = false
-            if x < 7 then
-                if self.mainIndex > 1 then
-                    self.mainIndex = self.mainIndex - 1
-                else
-                    self.mainIndex = #self.mainPage
-                end
-            elseif x > 9 then
-                if self.mainIndex < 3 then
-                    self.mainIndex = self.mainIndex + 1
-                else
-                    self.mainIndex = 1
-                end
-            end
-            self.mainPage[self.mainIndex].flag = true
-        end
+function flightGizmoAttScreen:onTouch(x, y)
+    if flightGizmoAbstractScreen.onTouch(self, x, y) then
+        return
     end
+end
 
-    if self.mainPage[1].flag then
-        if x < 12 then
-            if y >= 3 and y <= 8 then
-                for key, value in pairs(modelist) do
-                    if value.y == y then
-                        value.flag = true
-                        properties.mode = value.name
-                        if value.name == modelist[1].name or value.name == modelist[3].name then
-                            attUtil.setLastPos()
+-- flightGizmoSetScreen
+-- 飞控仪表（参数设置）屏幕
+flightGizmoSetScreen = {
+    screenTitle = "gizmo:set",
+    gizmoTitle = "SET"
+}
+flightGizmoSetScreen.__index = setmetatable(flightGizmoSetScreen, abstractScreen)
+
+function flightGizmoSetScreen:init()
+    if self.monitor.setTextScale then
+        self.monitor.setTextScale(0.5)
+    end
+    self.monitor.setBackgroundColor(colors.black)
+    self.gizmoLink = {
+        prev = "att",
+        this = "set",
+        next = "mod",
+    }
+    self.settingPage = {
+        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
+        helicopter  = { y = 4, name = "Helicopter ", selected = false, flag = false },
+        User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
+        HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
+        Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false },
+        SET_ATT     = { y = 8, name = "Set_Att    ", selected = false, flag = false },
+    }
+    self.faceList = {
+        { name = "west",  x = 3,  y = 6 },
+        { name = "north", x = 8,  y = 4 },
+        { name = "east",  x = 13, y = 6 },
+        { name = "south", x = 8,  y = 8 }
+    }
+end
+
+function flightGizmoSetScreen:refresh()
+    flightGizmoAbstractScreen.refresh(self)
+    if self.settingPage.PD_Tuning.flag then
+        modelist[1].lock = false
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
+
+        self.monitor.setCursorPos(2, 3)
+        self.monitor.blit("P: --      ++", "100ffffffffff", "fffb5ffffff1e")
+        self.monitor.setCursorPos(8, 3)
+        self.monitor.write(string.format("%0.2f", properties.omega_P))
+
+        self.monitor.setCursorPos(2, 4)
+        self.monitor.blit("D: --      ++", "900ffffffffff", "fffb5ffffff1e")
+        self.monitor.setCursorPos(8, 4)
+        self.monitor.write(string.format("%0.2f", properties.omega_D))
+
+        self.monitor.setCursorPos(2, 6)
+        self.monitor.blit("spaceAcc-   +", "00000000f000f", "ffffffffbfffe")
+        self.monitor.setCursorPos(11, 6)
+        self.monitor.write(string.format("%0.1f", properties.space_Acc))
+
+        self.monitor.setCursorPos(2, 7)
+        self.monitor.blit("quad_Acc-   +", "00000000f000f", "ffffffffbfffe")
+        self.monitor.setCursorPos(11, 7)
+        self.monitor.write(string.format("%0.1f", properties.quad_Acc))
+
+        self.monitor.setCursorPos(2, 8)
+        self.monitor.blit("MOVE_D: -   +", "00000000f000f", "ffffffffbfffe")
+        self.monitor.setCursorPos(11, 8)
+        self.monitor.write(string.format("%0.1f", properties.move_D))
+    elseif self.settingPage.helicopter.flag then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
+
+        self.monitor.setCursorPos(2, 3)
+        self.monitor.blit("Yaw_P--    ++", "00000ff0000ff", "fffffb5ffff1e")
+        self.monitor.setCursorPos(9, 3)
+        self.monitor.write(string.format("%0.2f", properties.helicopt_YAW_P))
+
+        self.monitor.setCursorPos(2, 4)
+        self.monitor.blit("Rot_P--    ++", "00000ff0000ff", "fffffb5ffff1e")
+        self.monitor.setCursorPos(9, 4)
+        self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_P))
+
+        self.monitor.setCursorPos(2, 5)
+        self.monitor.blit("Rot_D--    ++", "00000ff0000ff", "fffffb5ffff1e")
+        self.monitor.setCursorPos(9, 5)
+        self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_D))
+
+        self.monitor.setCursorPos(2, 6)
+        self.monitor.blit("ACC:-   +", "0000fffff", "ffffbfffe")
+        self.monitor.setCursorPos(7, 6)
+        self.monitor.write(string.format("%0.1f", properties.helicopt_ACC))
+
+        self.monitor.setCursorPos(2, 7)
+        self.monitor.blit("Acc_D--    ++", "00000ff0000ff", "fffffb5ffff1e")
+        self.monitor.setCursorPos(9, 7)
+        self.monitor.write(string.format("%0.2f", properties.helicopt_ACC_D))
+
+        self.monitor.setCursorPos(2, 8)
+        self.monitor.blit("MaxAngle:-  +", "000000000f00f", "fffffffffbffe")
+        self.monitor.setCursorPos(12, 8)
+        self.monitor.write(string.format("%d", properties.helicopt_MAX_ANGLE))
+    elseif self.settingPage.User_Change.flag then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
+        self.monitor.setCursorPos(2, 3)
+        self.monitor.blit("selectUser:", "88888888888", "fffffffffff")
+        for i = 1, 5, 1 do
+            if scanner.playerList[i] then
+                local name = scanner.playerList[i].name
+                self.monitor.setCursorPos(2, 3 + i)
+                if name == properties.userName then
+                    for j = 1, 10, 1 do
+                        local tmpChar = name:sub(j, j)
+                        if #tmpChar ~= 0 then
+                            self.monitor.blit(tmpChar, "f", "2")
                         end
-                    else
-                        value.flag = false
-                    end
-                end
-            end
-        else
-            if y == modelist[1].y then
-                attUtil.setLastPos()
-                modelist[1].lock = not modelist[1].lock
-            elseif y == modelist[3].y then
-                attUtil.setLastPos()
-                modelist[3].lock = not modelist[3].lock
-            elseif y == modelist[2].y then
-                modelist[2].lock = not modelist[2].lock
-            end
-        end
-    elseif self.mainPage[3].flag then
-        if self.settingPage.PD_Tuning.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.PD_Tuning.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 3 then
-                if x == 5 then
-                    properties.omega_P = properties.omega_P - 0.1
-                elseif x == 6 then
-                    properties.omega_P = properties.omega_P - 0.01
-                elseif x == 13 then
-                    properties.omega_P = properties.omega_P + 0.01
-                elseif x == 14 then
-                    properties.omega_P = properties.omega_P + 0.1
-                end
-            elseif y == 4 then
-                if x == 5 then
-                    properties.omega_D = properties.omega_D - 0.1
-                elseif x == 6 then
-                    properties.omega_D = properties.omega_D - 0.01
-                elseif x == 13 then
-                    properties.omega_D = properties.omega_D + 0.01
-                elseif x == 14 then
-                    properties.omega_D = properties.omega_D + 0.1
-                end
-
-                if properties.omega_D >= 2.52 then properties.omega_D = 2.52 end
-            elseif y == 6 then
-                if x == 10 then
-                    properties.space_Acc = properties.space_Acc - 0.1
-                elseif x == 14 then
-                    properties.space_Acc = properties.space_Acc + 0.1
-                end
-            elseif y == 7 then
-                if x == 10 then
-                    properties.quad_Acc = properties.quad_Acc - 0.1
-                elseif x == 14 then
-                    properties.quad_Acc = properties.quad_Acc + 0.1
-                end
-            elseif y == 8 then
-                if x == 10 then
-                    properties.move_D = properties.move_D - 0.1
-                elseif x == 14 then
-                    if properties.move_D < 1.6 then
-                        properties.move_D = properties.move_D + 0.1
-                    end
-                end
-            end
-        elseif self.settingPage.helicopter.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.helicopter.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 3 then
-                if x == 7 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.1
-                elseif x == 8 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.01
-                elseif x == 13 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.01
-                elseif x == 14 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.1
-                end
-            elseif y == 4 then
-                if x == 7 then
-                    properties.helicopt_ROT_P = properties.helicopt_ROT_P - 0.1
-                elseif x == 8 then
-                    properties.helicopt_ROT_P = properties.helicopt_ROT_P - 0.01
-                elseif x == 13 then
-                    properties.helicopt_ROT_P = properties.helicopt_ROT_P + 0.01
-                elseif x == 14 then
-                    properties.helicopt_ROT_P = properties.helicopt_ROT_P + 0.1
-                end
-            elseif y == 5 then
-                if x == 7 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.1
-                elseif x == 8 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.01
-                elseif x == 13 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.01
-                elseif x == 14 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.1
-                end
-            elseif y == 6 then
-                if x == 6 then
-                    properties.helicopt_ACC = properties.helicopt_ACC - 0.1
-                elseif x == 10 then
-                    properties.helicopt_ACC = properties.helicopt_ACC + 0.1
-                end
-            elseif y == 7 then
-                if x == 7 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.1
-                elseif x == 8 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.01
-                elseif x == 13 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.01
-                elseif x == 14 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.1
-                end
-            elseif y == 8 then
-                if x == 11 then
-                    properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE - 1
-                elseif x == 14 then
-                    if properties.helicopt_MAX_ANGLE < 60 then
-                        properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE + 1
-                    end
-                end
-            end
-        elseif self.settingPage.User_Change.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.User_Change.flag = false
-                system.updatePersistentData()
-            end
-
-            if y >= 4 and y <= 8 then
-                local user = scanner.playerList[y - 3]
-                if user then
-                    properties.userName = user.name
-                end
-            end
-        elseif self.settingPage.HOME_SET.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.HOME_SET.flag = false
-                system.updatePersistentData()
-            end
-        elseif self.settingPage.Simulate.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.Simulate.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 4 then
-                if x == 9 then
-                    properties.airMass = properties.airMass - 0.1
-                elseif x == 14 then
-                    properties.airMass = properties.airMass + 0.1
-                end
-            elseif y == 6 then
-                if x == 9 then
-                    properties.quadGravity = properties.quadGravity - 0.1
-                elseif x == 14 then
-                    properties.quadGravity = properties.quadGravity + 0.1
-                end
-            elseif y == 8 then
-                if x == 9 then
-                    if properties.ZeroPoint > -1 then
-                        properties.ZeroPoint = properties.ZeroPoint - 0.1
-                    end
-                elseif x == 14 then
-                    if properties.ZeroPoint < 0 then
-                        properties.ZeroPoint = properties.ZeroPoint + 0.1
-                    end
-                end
-            end
-        elseif self.settingPage.SET_ATT.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.SET_ATT.flag = false
-                system.updatePersistentData()
-            end
-
-            for k, v in pairs(self.faceList) do
-                if x == v.x and y == v.y then
-                    properties.shipFace = v.name
-                end
-            end
-        else
-            for key, value in pairs(self.settingPage) do
-                if y == value.y then
-                    if value.selected then
-                        value.flag = true
-                        if value == self.settingPage.User_Change then
-                            scanner.scanPlayer()
-                        end
-                    else
-                        value.selected = true
                     end
                 else
-                    value.selected = false
-                    value.flag = false
+                    for j = 1, 10, 1 do
+                        local tmpChar = name:sub(j, j)
+                        if #tmpChar ~= 0 then
+                            self.monitor.blit(tmpChar, "8", "f")
+                        end
+                    end
                 end
             end
         end
-    end
+    elseif self.settingPage.HOME_SET.flag then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
+    elseif self.settingPage.Simulate.flag then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
 
-    if y == 10 then
-        if x <= 3 then
-            system.updatePersistentData()
-            monitorUtil.blankAllScreens()
-            os.shutdown()
-        elseif x <= 6 then
-            system.updatePersistentData()
-            monitorUtil.blankAllScreens()
-            os.reboot()
-        elseif x >= 13 then
-            monitorUtil.disconnect(self.name)
+        self.monitor.setCursorPos(2, 4)
+        self.monitor.blit("AirMass-    +", "0000000f0000f", "fffffffbffffe")
+        self.monitor.setCursorPos(10, 4)
+        self.monitor.write(string.format("%0.1f", properties.airMass))
+
+        self.monitor.setCursorPos(2, 6)
+        self.monitor.blit("Gravity-    +", "0000000f0000f", "fffffffbffffe")
+        self.monitor.setCursorPos(10, 6)
+        self.monitor.write(string.format("%0.1f", properties.quadGravity))
+
+        self.monitor.setCursorPos(2, 8)
+        self.monitor.blit("0_Point-    +", "0000000f0000f", "fffffffbffffe")
+        self.monitor.setCursorPos(10, 8)
+        self.monitor.write(string.format("%0.1f", properties.ZeroPoint))
+    elseif self.settingPage.SET_ATT.flag then
+        self.monitor.setCursorPos(1, 2)
+        self.monitor.blit("<<", "24", "ff")
+
+        for k, v in pairs(self.faceList) do
+            if v.name == properties.shipFace then
+                self.monitor.setCursorPos(v.x, v.y)
+                self.monitor.blit(string.sub(v.name, 1, 1), "f", "e")
+            else
+                self.monitor.setCursorPos(v.x, v.y)
+                self.monitor.blit(string.sub(v.name, 1, 1), "8", "f")
+            end
+        end
+    else
+        for key, value in pairs(self.settingPage) do
+            self.monitor.setCursorPos(2, value.y)
+            if value.selected then
+                self.monitor.blit(value.name, "fffffffffff", "aaaaaaaaaaa")
+            else
+                self.monitor.blit(value.name, "88888888888", "fffffffffff")
+            end
         end
     end
+end
+
+function flightGizmoSetScreen:onTouch(x, y)
+    if flightGizmoAbstractScreen.onTouch(self, x, y) then
+        return
+    end
+    if self.settingPage.PD_Tuning.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.PD_Tuning.flag = false
+            system.updatePersistentData()
+        end
+
+        if y == 3 then
+            if x == 5 then
+                properties.omega_P = properties.omega_P - 0.1
+            elseif x == 6 then
+                properties.omega_P = properties.omega_P - 0.01
+            elseif x == 13 then
+                properties.omega_P = properties.omega_P + 0.01
+            elseif x == 14 then
+                properties.omega_P = properties.omega_P + 0.1
+            end
+        elseif y == 4 then
+            if x == 5 then
+                properties.omega_D = properties.omega_D - 0.1
+            elseif x == 6 then
+                properties.omega_D = properties.omega_D - 0.01
+            elseif x == 13 then
+                properties.omega_D = properties.omega_D + 0.01
+            elseif x == 14 then
+                properties.omega_D = properties.omega_D + 0.1
+            end
+
+            if properties.omega_D >= 2.52 then properties.omega_D = 2.52 end
+        elseif y == 6 then
+            if x == 10 then
+                properties.space_Acc = properties.space_Acc - 0.1
+            elseif x == 14 then
+                properties.space_Acc = properties.space_Acc + 0.1
+            end
+        elseif y == 7 then
+            if x == 10 then
+                properties.quad_Acc = properties.quad_Acc - 0.1
+            elseif x == 14 then
+                properties.quad_Acc = properties.quad_Acc + 0.1
+            end
+        elseif y == 8 then
+            if x == 10 then
+                properties.move_D = properties.move_D - 0.1
+            elseif x == 14 then
+                if properties.move_D < 1.6 then
+                    properties.move_D = properties.move_D + 0.1
+                end
+            end
+        end
+    elseif self.settingPage.helicopter.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.helicopter.flag = false
+            system.updatePersistentData()
+        end
+
+        if y == 3 then
+            if x == 7 then
+                properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.1
+            elseif x == 8 then
+                properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.01
+            elseif x == 13 then
+                properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.01
+            elseif x == 14 then
+                properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.1
+            end
+        elseif y == 4 then
+            if x == 7 then
+                properties.helicopt_ROT_P = properties.helicopt_ROT_P - 0.1
+            elseif x == 8 then
+                properties.helicopt_ROT_P = properties.helicopt_ROT_P - 0.01
+            elseif x == 13 then
+                properties.helicopt_ROT_P = properties.helicopt_ROT_P + 0.01
+            elseif x == 14 then
+                properties.helicopt_ROT_P = properties.helicopt_ROT_P + 0.1
+            end
+        elseif y == 5 then
+            if x == 7 then
+                properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.1
+            elseif x == 8 then
+                properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.01
+            elseif x == 13 then
+                properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.01
+            elseif x == 14 then
+                properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.1
+            end
+        elseif y == 6 then
+            if x == 6 then
+                properties.helicopt_ACC = properties.helicopt_ACC - 0.1
+            elseif x == 10 then
+                properties.helicopt_ACC = properties.helicopt_ACC + 0.1
+            end
+        elseif y == 7 then
+            if x == 7 then
+                properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.1
+            elseif x == 8 then
+                properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.01
+            elseif x == 13 then
+                properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.01
+            elseif x == 14 then
+                properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.1
+            end
+        elseif y == 8 then
+            if x == 11 then
+                properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE - 1
+            elseif x == 14 then
+                if properties.helicopt_MAX_ANGLE < 60 then
+                    properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE + 1
+                end
+            end
+        end
+    elseif self.settingPage.User_Change.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.User_Change.flag = false
+            system.updatePersistentData()
+        end
+
+        if y >= 4 and y <= 8 then
+            local user = scanner.playerList[y - 3]
+            if user then
+                properties.userName = user.name
+            end
+        end
+    elseif self.settingPage.HOME_SET.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.HOME_SET.flag = false
+            system.updatePersistentData()
+        end
+    elseif self.settingPage.Simulate.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.Simulate.flag = false
+            system.updatePersistentData()
+        end
+
+        if y == 4 then
+            if x == 9 then
+                properties.airMass = properties.airMass - 0.1
+            elseif x == 14 then
+                properties.airMass = properties.airMass + 0.1
+            end
+        elseif y == 6 then
+            if x == 9 then
+                properties.quadGravity = properties.quadGravity - 0.1
+            elseif x == 14 then
+                properties.quadGravity = properties.quadGravity + 0.1
+            end
+        elseif y == 8 then
+            if x == 9 then
+                if properties.ZeroPoint > -1 then
+                    properties.ZeroPoint = properties.ZeroPoint - 0.1
+                end
+            elseif x == 14 then
+                if properties.ZeroPoint < 0 then
+                    properties.ZeroPoint = properties.ZeroPoint + 0.1
+                end
+            end
+        end
+    elseif self.settingPage.SET_ATT.flag then
+        if y == 2 and x < 3 then
+            self.settingPage.SET_ATT.flag = false
+            system.updatePersistentData()
+        end
+
+        for k, v in pairs(self.faceList) do
+            if x == v.x and y == v.y then
+                properties.shipFace = v.name
+            end
+        end
+    else
+        for key, value in pairs(self.settingPage) do
+            if y == value.y then
+                if value.selected then
+                    value.flag = true
+                    if value == self.settingPage.User_Change then
+                        scanner.scanPlayer()
+                    end
+                else
+                    value.selected = true
+                end
+            else
+                value.selected = false
+                value.flag = false
+            end
+        end
+    end
+end
+
+-- flightGizmoPickerScreen
+-- 飞控系统屏幕选择器
+flightGizmoPickerScreen = {
+    screenTitle = "gizmo"
+}
+flightGizmoPickerScreen.__index = setmetatable(flightGizmoPickerScreen, abstractScreen)
+
+local gizmoClasses = {
+    mod = flightGizmoModScreen,
+    att = flightGizmoAttScreen,
+    set = flightGizmoSetScreen,
+}
+
+function flightGizmoPickerScreen:init()
+    if not properties.lastGizmo[self.name] then
+        properties.lastGizmo[self.name] = "mod"
+    end
+    monitorUtil.newScreen(self.name, gizmoClasses[properties.lastGizmo[self.name]])
 end
 
 -- debugScreen
@@ -1762,12 +1854,12 @@ end
 
 function debugScreen:refresh()
     self.monitor.setTextColor(colors.white)
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
     self.monitor.setBackgroundColor(colors.red)
     self.monitor.write("[<]")
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.write(" DEBUG:")
     for i, row in ipairs(self.rows) do
         self.monitor.setCursorPos(1, i + 1)
@@ -1799,12 +1891,12 @@ function logScreen:refresh()
     end
     self.lastLogId = logger.curId
     self.monitor.setTextColor(colors.white)
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
     self.monitor.setBackgroundColor(colors.red)
     self.monitor.write("[<]")
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.write(" Log:")
     local startAt = logger.curId - ({ self.monitor.getSize() })[2] + 2
     local line = 1
@@ -1823,7 +1915,7 @@ function logScreen:refresh()
                 self.monitor.setBackgroundColor(colors.gray)
             end
             self.monitor.write(row.text)
-            self.monitor.setBackgroundColor(colors.lightBlue)
+            self.monitor.setBackgroundColor(colors.black)
         end
     end
 end
@@ -1864,7 +1956,7 @@ function screensManagerScreen:refresh()
     self.monitor.setCursorPos(1, 1)
     self.monitor.setBackgroundColor(colors.red)
     self.monitor.write("[<]")
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.write(" Monitors:")
     local newrows = {}
     for i, name in ipairs(redirects) do
@@ -1937,7 +2029,7 @@ function screenPickerScreen:init()
         --table.insert(self.rows, { name = "debug", class = debugScreen })
         --table.insert(self.rows, { name = "log", class = logScreen })
     end
-    table.insert(self.rows, { name = "flight gizmo", class = flightGizmoScreen })
+    table.insert(self.rows, { name = "flight gizmo", class = flightGizmoPickerScreen })
     if #self.rows == 1 then
         monitorUtil.newScreen(self.name, self.rows[1].class)
         return
@@ -2177,23 +2269,48 @@ function flightUpdate()
     end
 end
 
-local phys_Count = 1
-local testRun = function(phys)
+-- 飞行警报
+function issueWarning()
+    local warns = {}
+    if ship.isStatic() then
+        table.insert(warns, "[STATIC!]")
+    end
+    --[[if not joyUtil.joy then
+        table.insert(warns, "[ INPUT?]")
+    end]]
+    if coordinate and not scanner.commander then
+        table.insert(warns, "[NO USER]")
+    end
+    if #warns == 0 then
+        screenWarning = nil
+    else
+        screenWarning = warns[math.floor(1 + os.clock() % #warns)]
+    end
+end
+
+-- 物理刻方法，预期每秒60次
+-- 用于与VS物理线程关联的更新：物理属性更新和飞控行为
+function onPhysicsTick(phys)
     attUtil.poseVel = phys.getPoseVel()
     attUtil.inertia = phys.getInertia()
     attUtil.getAttWithPhysTick()
     joyUtil.getJoyInput()
-
-    if phys_Count == 3 then
-        scanner.scan()
-        monitorUtil.refresh()
-        phys_Count = 1
-    else
-        phys_Count = phys_Count + 1
-    end
-
     flightUpdate()
     attUtil.setPreAtt()
+end
+
+-- 主循环方法，预期每秒20次
+-- 用于与Minecraft主循环关联的更新：实体扫描器和屏幕响应
+function onCCTick()
+    scanner.scan()
+    if not on_physics_ticks then
+        attUtil.getAttWithCCTick()
+        joyUtil.getJoyInput()
+        flightUpdate()
+        attUtil.setPreAtt()
+    end
+    issueWarning()
+    monitorUtil.refresh()
 end
 
 -- 事件监听器
@@ -2204,10 +2321,11 @@ function listener()
         --logger.logMessage("on event " .. event)
 
         if event == "physics_tick" then
-            if physics_flag then
-                physics_flag = false
+            if not on_physics_ticks then
+                on_physics_ticks = true
+                pdControl.usePTickMode()
             end
-            testRun(eventData[2])
+            onPhysicsTick(eventData[2])
         end
 
         if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
@@ -2227,27 +2345,8 @@ end
 
 -- 主循环
 function run()
-    sleep(0.5)
-    if physics_flag then
-        pdControl.basicYSpeed = 30
-        pdControl.helicopt_P_multiply = 1.5
-        pdControl.helicopt_D_multiply = 4
-        pdControl.rot_P_multiply = 1.5
-        pdControl.rot_D_multiply = 0.5
-        pdControl.move_P_multiply = 2
-        pdControl.move_D_multiply = 100
-        pdControl.airMass_multiply = 20
-    else
-        return
-    end
-
     while true do
-        scanner.scan()
-        attUtil.getAttWithCCTick()
-        joyUtil.getJoyInput()
-        monitorUtil.refresh()
-        flightUpdate()
-        attUtil.setPreAtt()
+        onCCTick()
         sleep(0.05)
     end
 end
