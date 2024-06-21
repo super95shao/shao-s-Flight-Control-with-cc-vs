@@ -1187,11 +1187,13 @@ function flightGizmoAbstractScreen:refresh()
             end
         end
     end]]
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     --title, reboot and shutdown
     self.monitor.setCursorPos(1, 1)
     self.monitor.blit("  <<       >>  ", "ffaa2222222aaff", "fffffffffffffff")
     self.monitor.setCursorPos(9 - math.ceil(#self.gizmoTitle / 2), 1)
+    self.monitor.setTextColor(colors.magenta)
     self.monitor.write(self.gizmoTitle)
     self.monitor.setCursorPos(1, 10)
     --self.monitor.blit("[|][R]      [X]", "eeebbb222222888", "fffffffffffffff")
@@ -1200,12 +1202,12 @@ function flightGizmoAbstractScreen:refresh()
         self.monitor.setCursorPos(4, 10)
         self.monitor.setTextColor(colors.orange)
         self.monitor.write(screenWarning)
-        self.monitor.setTextColor(colors.white)
     end
     if self.name == "computer" then
         self.monitor.setCursorPos(1, 11)
         self.monitor.blit("[<]", "eee", "fff")
     end
+    self.monitor.setTextColor(colors.white)
 end
 
 function flightGizmoAbstractScreen:onTouch(x, y)
