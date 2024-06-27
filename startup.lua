@@ -12,15 +12,17 @@ end
 
 ---------inner---------
 local modelist = {
-    { y = 3, name = "spaceShip ", flag = false, lock = false },
-    { y = 4, name = "quadFPV   ", flag = false, lock = false },
-    { y = 5, name = "helicopter", flag = false, lock = false },
-    { y = 6, name = "hms_fly   ", flag = false },
-    { y = 7, name = "follow    ", flag = false },
-    { y = 8, name = "pointLoop ", flag = false }
+    { name = "spaceShip",  flag = false },
+    { name = "quadFPV",    flag = false },
+    { name = "helicopter", flag = false },
+    { name = "hms_fly",    flag = false },
+    { name = "follow",     flag = false },
+    { name = "goHome",     flag = false },
+    { name = "pointLoop ", flag = false }
 }
 
 local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil
+local physics_flag = true
 
 ---------system---------
 system = {
@@ -39,23 +41,25 @@ system.init = function()
                 properties[k] = tmpProp[k]
             end
         end
-        if properties.omega_D > 1.52 then properties.omega_D = 1.52 end
+        tmpProp = system.reset()
+        for k, v in pairs(tmpProp.profile.keyboard) do
+            if not properties.profile.keyboard[k] then
+                properties.profile.keyboard[k] = v
+            end
+        end
+        for k, v in pairs(tmpProp.profile.joyStick) do
+            if not properties.profile.joyStick[k] then
+                properties.profile.joyStick[k] = v
+            end
+        end
+        if properties.profile.keyboard.spaceShip_D > 3.52 then properties.profile.keyboard.spaceShip_D = 3.52 end
+        if properties.profile.keyboard.quad_D > 3.52 then properties.profile.keyboard.quad_D = 3.52 end
+        if properties.profile.joyStick.spaceShip_D > 3.52 then properties.profile.joyStick.spaceShip_D = 3.52 end
+        if properties.profile.joyStick.quad_D > 3.52 then properties.profile.joyStick.quad_D = 3.52 end
         system.file:close()
     else
         properties = system.reset()
         system.updatePersistentData()
-    end
-
-    for key, value in pairs(modelist) do
-        if value.name == properties.mode then
-            value.flag = true
-        end
-    end
-
-    for k, v in pairs(modelist) do
-        if properties.mode == v.name then
-            system.modeIndex = v.y - 2
-        end
     end
 end
 
@@ -67,29 +71,64 @@ system.reset = function()
     end
     return {
         userName = "fashaodesu",
-        mode = modelist[2].name,
+        mode = 1,
         HOME = { x = 0, y = 120, z = 0 },
         homeList = {
             { x = 0, y = 120, z = 0 }
         },
         enabledMonitors = enabledMonitors,
-        omega_P = 1,    --角速度比例, 决定转向快慢
-        omega_D = 1.52, --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-        space_Acc = 2,  --星舰模式油门速度
-        quad_Acc = 1,   --四轴FPV模式油门强度
-        move_D = 1.6,   --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
-        helicopt_YAW_P = 0.5,
-        helicopt_ROT_D = 0.75,
-        helicopt_MAX_ANGLE = 45,
-        helicopt_ACC = 0.5,
-        helicopt_ACC_D = 0.5,
-        ZeroPoint = 0,
-        MAX_MOVE_SPEED = 99,    --自动驾驶 (点循环、跟随模式) 最大跟随速度
-        pointLoopWaitTime = 60, --点循环模式-到达目标点后等待时间 (tick)
+        winIndex = {},
+        profileIndex = "joyStick",
+        profile = {
+            keyboard = {
+                spaceShip_P = 1,        --角速度比例, 决定转向快慢
+                spaceShip_D = 3.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 2,      --星舰模式油门速度
+                spaceShip_SideMove = 2, --星舰模式横移速度
+                spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
+                spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                quad_P = 1,
+                quad_D = 3.52,
+                quad_Acc = 1, --四轴FPV模式油门强度
+                lock = false,
+                helicopt_YAW_P = 0.75,
+                helicopt_ROT_P = 1,
+                helicopt_ROT_D = 0.75,
+                helicopt_MAX_ANGLE = 30,
+                helicopt_ACC = 0.5,
+                helicopt_ACC_D = 0.75
+            },
+            joyStick = {
+                spaceShip_P = 1,        --角速度比例, 决定转向快慢
+                spaceShip_D = 3.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 2,      --星舰模式油门速度
+                spaceShip_SideMove = 2, --星舰模式横移速度
+                spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
+                spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                quad_P = 1,
+                quad_D = 3.52,
+                quad_Acc = 1, --四轴FPV模式油门强度
+                lock = false,
+                helicopt_YAW_P = 0.75,
+                helicopt_ROT_P = 1,
+                helicopt_ROT_D = 0.75,
+                helicopt_MAX_ANGLE = 30,
+                helicopt_ACC = 0.5,
+                helicopt_ACC_D = 0.75
+            }
+        },
+        zeroPoint = 0,
+        gravity = -1,
+        airMass = 1, --空气密度 (风阻)
         rayCasterRange = 128,
         shipFace = "west",
-        quadGravity = -1,
-        airMass = 1,                            --空气密度 (风阻)
+        bg = "f",
+        font = "8",
+        title = "3",
+        select = "3",
+        other = "7",
+        MAX_MOVE_SPEED = 99,                    --自动驾驶 (点循环、跟随模式) 最大跟随速度
+        pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         pointList = {                           --点循环模式，按照顺序逐个前往
             { x = -4499, y = 74, z = -896, yaw = 0, flip = false }
@@ -121,7 +160,7 @@ local function joinArrayTables(...)
     local entries = {}
     for i = 1, select('#', ...) do
         local t = select(i, ...)
-        for i, v in ipairs(t) do
+        for _, v in ipairs(t) do
             table.insert(entries, v)
         end
     end
@@ -342,6 +381,37 @@ function split(input, delimiter)
     return arr
 end
 
+function genStr(s, count)
+    local result = ""
+    for i = 1, count, 1 do
+        result = result .. s
+    end
+    return result
+end
+
+function getNextColor(color, index)
+    local num = string.byte(string.sub(color, 1, 1))
+    num = num + index
+    if num < 48 then num = 102 end
+    if num == 58 then num = 97 end
+    if num == 103 then num = 48 end
+    if num == 96 then num = 57 end
+    return string.char(num)
+end
+
+function getColorDec(paint)
+    paint = string.byte(string.sub(paint, 1, 1))
+    local result
+    if paint == 48 then
+        result = 1
+    elseif paint > 96 and paint < 103 then
+        result = 2 ^ (paint - 87)
+    elseif paint > 48 and paint < 58 then
+        result = 2 ^ (paint - 48)
+    end
+    return result
+end
+
 -----------rayCaster-----------
 rayCaster = {
     block = nil
@@ -501,11 +571,13 @@ end
 ---------timeUtil---------
 timeUtil = {
     SpaceBasedGunCd = 1,
-    pointLoopIndex = 1,
     pointLoopWaitTime = 1
 }
+
 ---------attUtil---------
 attUtil = {
+    poseVel = {},
+    inertia = {},
     position = {},
     prePos = {},
     size = {},
@@ -516,7 +588,6 @@ attUtil = {
     omega = {},
     eulerAngle = {},
     preEuler = {},
-    eulerOmega = {},
     initPoint = {},
     velocity = {},
     speed = {},
@@ -536,26 +607,51 @@ attUtil.quatList = {
     north = { w = -0.70710678118654752440084436210485, x = 0, y = 0.70710678118654752440084436210485, z = 0 },
 }
 
-attUtil.getAtt = function()
-    attUtil.mass = ship.getMass()
-    attUtil.MomentOfInertiaTensor = ship.getMomentOfInertiaTensor()[1][1]
-
-    attUtil.mass = attUtil.mass * ship.getScale().x ^ 3
-    attUtil.MomentOfInertiaTensor = attUtil.MomentOfInertiaTensor * ship.getScale().x ^ 3
+attUtil.getAttWithCCTick = function()
+    attUtil.mass = ship.getMass() * ship.getScale().x ^ 3
+    attUtil.MomentOfInertiaTensor = ship.getMomentOfInertiaTensor()[1][1] * ship.getScale().x ^ 3
 
     attUtil.size = ship.getSize()
     attUtil.position = ship.getWorldspacePosition()
     attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], ship.getQuaternion())
     attUtil.conjQuat = getConjQuat(ship.getQuaternion())
     attUtil.matrix = ship.getRotationMatrix()
-    --attUtil.eulerAngle = getEulerByMatrix(attUtil.matrix)
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
+    attUtil.getOmega(attUtil.pX, attUtil.pY, attUtil.pZ)
+    attUtil.velocity.x = ship.getVelocity().x / 20
+    attUtil.velocity.y = ship.getVelocity().y / 20
+    attUtil.velocity.z = ship.getVelocity().z / 20
+    attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
+    --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(attUtil.eulerAngle.roll, attUtil.eulerAngle.yaw, attUtil.eulerAngle.pitch))
+    --commands.execAsync(("say w = %0.2f x=%0.2f  y=%0.2f  z=%0.2f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
+end
 
-    local XPoint = { x = attUtil.pX.x, y = attUtil.pX.y, z = attUtil.pX.z }
-    local ZPoint = { x = attUtil.pZ.x, y = attUtil.pZ.y, z = attUtil.pZ.z }
+attUtil.getAttWithPhysTick = function()
+    attUtil.mass = attUtil.inertia.mass * ship.getScale().x ^ 3
+    attUtil.MomentOfInertiaTensor = attUtil.inertia.momentOfInertiaTensor[1][1] * ship.getScale().x ^ 3
+
+    attUtil.size = ship.getSize()
+    attUtil.position = attUtil.poseVel.pos
+    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], attUtil.poseVel.rot)
+    attUtil.conjQuat = getConjQuat(attUtil.poseVel.rot)
+    attUtil.matrix = ship.getRotationMatrix()
+    attUtil.eulerAngle = quat2Euler(attUtil.quat)
+    attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
+    attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
+    attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
+    attUtil.getOmega(attUtil.pX, attUtil.pY, attUtil.pZ)
+    attUtil.velocity.x = attUtil.poseVel.vel.x / 60
+    attUtil.velocity.y = attUtil.poseVel.vel.y / 60
+    attUtil.velocity.z = attUtil.poseVel.vel.z / 60
+    attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
+end
+
+attUtil.getOmega = function(xp, yp, zp)
+    local XPoint = { x = xp.x, y = xp.y, z = xp.z }
+    local ZPoint = { x = zp.x, y = zp.y, z = zp.z }
     attUtil.preQuat.x = -attUtil.preQuat.x
     attUtil.preQuat.y = -attUtil.preQuat.y
     attUtil.preQuat.z = -attUtil.preQuat.z
@@ -564,16 +660,6 @@ attUtil.getAtt = function()
     attUtil.omega.roll = math.deg(math.asin(ZPoint.y))
     attUtil.omega.pitch = math.deg(math.asin(XPoint.y))
     attUtil.omega.yaw = math.deg(math.atan2(-XPoint.z, XPoint.x))
-
-    attUtil.eulerOmega.roll = attUtil.eulerAngle.roll - attUtil.preEuler.roll
-    attUtil.eulerOmega.yaw = attUtil.eulerAngle.yaw - attUtil.preEuler.yaw
-    attUtil.eulerOmega.pitch = attUtil.eulerAngle.pitch - attUtil.preEuler.pitch
-
-    attUtil.velocity.x = ship.getVelocity().x / 20
-    attUtil.velocity.y = ship.getVelocity().y / 20
-    attUtil.velocity.z = ship.getVelocity().z / 20
-    --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(attUtil.eulerAngle.roll, attUtil.eulerAngle.yaw, attUtil.eulerAngle.pitch))
-    --commands.execAsync(("say w = %0.2f x=%0.2f  y=%0.2f  z=%0.2f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
 end
 
 attUtil.setPreAtt = function()
@@ -634,13 +720,11 @@ joyUtil = {
     flag = false
 }
 
-joyUtil.init = function()
-
-end
-
 joyUtil.getJoyInput = function()
     if not joyUtil.joy or not peripheral.hasType(joyUtil.joy, "tweaked_controller") then
         joyUtil.joy = peripheral.find("tweaked_controller")
+    else
+        joyUtil.defaultOutput()
     end
     if joyUtil.joy then
         joyUtil.flag = pcall(joyUtil.joy.hasUser)
@@ -662,20 +746,9 @@ joyUtil.getJoyInput = function()
             joyUtil.down = joyUtil.joy.getButton(14)
             joyUtil.left = joyUtil.joy.getButton(15)
             joyUtil.right = joyUtil.joy.getButton(13)
+            joyUtil.LeftJoyClick = joyUtil.joy.getButton(10)
         else
-            joyUtil.LeftStick.x = 0
-            joyUtil.LeftStick.y = 0
-            joyUtil.RightStick.x = 0
-            joyUtil.RightStick.y = 0
-            joyUtil.LB = 0
-            joyUtil.RB = 0
-            joyUtil.LT = 0
-            joyUtil.RT = 0
-            joyUtil.back = 0
-            joyUtil.start = 0
-            joyUtil.up = false
-            joyUtil.down = false
-            joyUtil.right = false
+            joyUtil.defaultOutput()
         end
 
         joyUtil.LB = joyUtil.LB and 1 or 0
@@ -686,32 +759,41 @@ joyUtil.getJoyInput = function()
         joyUtil.BTStick = MatrixMultiplication(joyUtil.faceListLeft[properties.shipFace], joyUtil.BTStick)
 
         if joyUtil.cd < 1 then
-            if joyUtil.up or joyUtil.down then
-                if joyUtil.up then
-                    system.modeIndex = system.modeIndex > 1 and system.modeIndex - 1 or #modelist
-                elseif joyUtil.down then
-                    system.modeIndex = system.modeIndex < #modelist and system.modeIndex + 1 or 1
-                end
-                for i = 1, #modelist, 1 do
-                    if i == system.modeIndex then
-                        modelist[i].flag = true
-                    else
-                        modelist[i].flag = false
-                    end
+            if joyUtil.back or joyUtil.start then
+                local index = properties.mode
+                if joyUtil.start then
+                    index = index < #modelist and index + 1 or 1
+                elseif joyUtil.back then
+                    index = index > 1 and index - 1 or #modelist
                 end
                 attUtil.setLastPos()
-                properties.mode = modelist[system.modeIndex].name
+                properties.mode = index
                 joyUtil.cd = 4
             elseif joyUtil.right or joyUtil.left then
-                if system.modeIndex < 4 then
-                    modelist[system.modeIndex].lock = not modelist[system.modeIndex].lock
-                    attUtil.setLastPos()
-                end
                 joyUtil.cd = 4
             end
         end
         joyUtil.cd = joyUtil.cd > 0 and joyUtil.cd - 1 or 0
+    else
+        joyUtil.defaultOutput()
     end
+end
+
+joyUtil.defaultOutput = function()
+    joyUtil.LeftStick.x = 0
+    joyUtil.LeftStick.y = 0
+    joyUtil.RightStick.x = 0
+    joyUtil.RightStick.y = 0
+    joyUtil.LeftJoyClick = false
+    joyUtil.LB = 0
+    joyUtil.RB = 0
+    joyUtil.LT = 0
+    joyUtil.RT = 0
+    joyUtil.back = false
+    joyUtil.start = false
+    joyUtil.up = false
+    joyUtil.down = false
+    joyUtil.right = false
 end
 
 ---------PDcontrol---------
@@ -722,13 +804,21 @@ pdControl = {
     xSpeed = 0,
     ySpeed = 0,
     zSpeed = 0,
-    basicYSpeed = 30,
-    fixCd = 0
+    fixCd = 0,
+    pointLoopIndex = 1,
+    basicYSpeed = 10,
+    helicopt_P_multiply = 1,
+    helicopt_D_multiply = 1,
+    rot_P_multiply = 1,
+    rot_D_multiply = 1,
+    move_P_multiply = 1,
+    move_D_multiply = 100,
+    airMass_multiply = 10
 }
 
 pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
-    p = p * 2
-    d = d * 200
+    p = p * pdControl.move_P_multiply
+    d = d * pdControl.move_D_multiply
     pdControl.xSpeed = xVal * p + -attUtil.velocity.x * d
     pdControl.zSpeed = zVal * p + -attUtil.velocity.z * d
     pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
@@ -738,9 +828,9 @@ pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
         pdControl.zSpeed * attUtil.mass)
 end
 
-pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
-    p = p * 2
-    d = d * 200
+pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
+    p = p * pdControl.move_P_multiply
+    d = d * pdControl.move_D_multiply
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
     pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
@@ -749,34 +839,46 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d)
         pdControl.ySpeed * attUtil.mass,
         pdControl.zSpeed * attUtil.mass)
 
+    if sidemove_p then
+        sidemove_p = sidemove_p * pdControl.move_P_multiply
+        ship.applyRotDependentForce(xVal * p * attUtil.mass,
+        0,
+        zVal * sidemove_p * attUtil.mass)
+    end
     ship.applyRotDependentForce(xVal * p * attUtil.mass,
         0,
         zVal * p * attUtil.mass)
 end
 
 pdControl.quadUp = function(yVal, p, d, hov)
-    p = p * 2
-    d = d * 200
+    p = p * pdControl.move_P_multiply
+    d = d * pdControl.move_D_multiply
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p + pdControl.basicYSpeed * 2 +
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.profile[properties.profileIndex].ZeroPoint))) * p +
+            pdControl.basicYSpeed * 2 +
             -omegaApplyRot.y * d
     else
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.ZeroPoint))) * p
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.profile[properties.profileIndex].ZeroPoint))) * p
     end
 
     ship.applyRotDependentForce(0, pdControl.ySpeed * attUtil.mass, 0)
 
-    pdControl.xSpeed = copysign((attUtil.velocity.x ^ 2) * 10 * properties.airMass, -attUtil.velocity.x)
-    pdControl.zSpeed = copysign((attUtil.velocity.z ^ 2) * 10 * properties.airMass, -attUtil.velocity.z)
-    pdControl.ySpeed = copysign((attUtil.velocity.y ^ 2) * 10 * properties.airMass, -attUtil.velocity.y)
+    pdControl.xSpeed = copysign((attUtil.velocity.x ^ 2) * pdControl.airMass_multiply * properties.airMass,
+        -attUtil.velocity.x)
+    pdControl.zSpeed = copysign((attUtil.velocity.z ^ 2) * pdControl.airMass_multiply * properties.airMass,
+        -attUtil.velocity.z)
+    pdControl.ySpeed = copysign((attUtil.velocity.y ^ 2) * pdControl.airMass_multiply * properties.airMass,
+        -attUtil.velocity.y)
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
-        pdControl.ySpeed * attUtil.mass + properties.quadGravity * 30 * attUtil.mass,
+        pdControl.ySpeed * attUtil.mass + properties.gravity * pdControl.basicYSpeed * attUtil.mass,
         pdControl.zSpeed * attUtil.mass)
 end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
+    p                    = p * pdControl.rot_P_multiply
+    d                    = d * pdControl.rot_D_multiply
     pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
@@ -796,70 +898,74 @@ pdControl.rotate2Euler = function(euler, p, d)
     yaw                          = tgAg.yaw * (1 - attUtil.pX.y ^ 2) + -tgAg.roll * (attUtil.pX.y ^ 2)
     roll                         = tgAg.roll * (1 - attUtil.pX.y ^ 2) + tgAg.yaw * (attUtil.pX.y ^ 2)
     pitch                        = tgAg.pitch * (1 - attUtil.pZ.y ^ 2) + tgAg.yaw * (attUtil.pZ.y ^ 2)
-    roll                         = roll
-    yaw                          = yaw
-    pitch                        = pitch
 
     pdControl.rotInner(roll, yaw, pitch, p, d)
 end
 
-pdControl.rotate2Euler2 = function(euler)
+pdControl.rotate2Euler2 = function(euler, p, d)
+    local x_c = math.cos(math.rad(euler.pitch))
     local tmpx = {
-        x = -math.cos(math.rad(euler.yaw)),
+        x = -math.cos(math.rad(euler.yaw)) * x_c,
         y = -math.sin(math.rad(euler.pitch)),
-        z = math.sin(math.rad(euler.yaw))
+        z = math.sin(math.rad(euler.yaw)) * x_c
     }
+    euler.yaw = -euler.yaw
+    local z_c = math.cos(math.rad(euler.roll))
     local tmpz = {
-        x = math.sin(math.rad(euler.yaw)),
-        y = math.sin(math.rad(euler.roll)),
-        z = -math.cos(math.rad(euler.yaw))
+        x = math.sin(math.rad(euler.yaw)) * z_c,
+        y = -math.sin(math.rad(euler.roll)),
+        z = -math.cos(math.rad(euler.yaw)) * z_c
     }
 
-    local newXpoint = RotateVectorByQuat(attUtil.conjQuat, tmpx)
-    local newZpoint = RotateVectorByQuat(attUtil.conjQuat, tmpz)
-    local roll = math.deg(math.asin(newZpoint.y))
-    local yaw = math.deg(math.atan2(newXpoint.z, -newXpoint.x))
-    local pitch = -math.deg(math.asin(newXpoint.y))
+    tmpx = RotateVectorByQuat(attUtil.conjQuat, tmpx)
+    tmpz = RotateVectorByQuat(attUtil.conjQuat, tmpz)
+    local xRot = math.deg(math.asin(tmpz.y))
+    local yRot = math.deg(math.atan2(tmpx.z, -tmpx.x))
+    local zRot = -math.deg(math.asin(tmpx.y))
 
-    commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(roll, yaw, pitch))
-    --pdControl.rotInner(roll, yaw, pitch, properties.omega_P, properties.omega_D)
+    pdControl.rotInner(xRot, yRot, zRot, p, d)
 end
 
 pdControl.spaceShip = function()
-    if modelist[1].lock then
+    if properties.profile[properties.profileIndex].lock then
         if next(attUtil.tmpFlags.spaceShipLastEuler) == nil then attUtil.setLastPos() end
         if next(attUtil.tmpFlags.spaceShipLastPos) == nil then attUtil.setLastPos() end
         pdControl.gotoPosition(attUtil.tmpFlags.spaceShipLastEuler, attUtil.tmpFlags.spaceShipLastPos)
     else
-        pdControl.moveWithRot(
-            math.deg(math.asin(joyUtil.BTStick.y)),
-            math.deg(math.asin(joyUtil.LeftStick.y)),
-            math.deg(math.asin(joyUtil.BTStick.x)),
-            properties.space_Acc,
-            properties.move_D)
+        local forward, up, sideMove = math.deg(math.asin(joyUtil.BTStick.y)), math.deg(math.asin(joyUtil.LeftStick.y)),
+            math.deg(math.asin(joyUtil.BTStick.x))
+        local xRot, yRot, zRot = math.deg(math.asin(joyUtil.RightStick.x)), math.deg(math.asin(joyUtil.LeftStick.x)),
+            math.deg(math.asin(joyUtil.RightStick.y))
+        if joyUtil.LeftJoyClick then
+            local p = properties.profile[properties.profileIndex].spaceShip_Burner
+            forward, up, sideMove = forward * p, up * p, sideMove * p
+            --p = p / 2
+            --xRot, yRot, zRot = xRot * p, yRot * p, zRot * p
+        end
+        pdControl.moveWithRot(forward, up, sideMove,
+            properties.profile[properties.profileIndex].spaceShip_Acc,
+            properties.profile[properties.profileIndex].spaceShip_move_D,
+            properties.profile[properties.profileIndex].spaceShip_SideMove)
+        pdControl.rotInner(
+            xRot, yRot, zRot,
+            properties.profile[properties.profileIndex].spaceShip_P,
+            properties.profile[properties.profileIndex].spaceShip_D)
     end
-
-    pdControl.rotInner(
-        math.deg(math.asin(joyUtil.RightStick.x)),
-        math.deg(math.asin(joyUtil.LeftStick.x)),
-        math.deg(math.asin(joyUtil.RightStick.y)),
-        properties.omega_P,
-        properties.omega_D)
 end
 
 pdControl.quadFPV = function()
-    if modelist[2].lock then
+    if properties.profile[properties.profileIndex].lock then
         if joyUtil.LeftStick.y == 0 then
             pdControl.quadUp(
                 0,
-                properties.quad_Acc,
-                properties.move_D,
+                properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+                3,
                 true)
         else
             pdControl.quadUp(
                 math.deg(math.asin(joyUtil.LeftStick.y)),
-                properties.quad_Acc,
-                properties.move_D,
+                properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+                3,
                 false)
         end
 
@@ -876,40 +982,40 @@ pdControl.quadFPV = function()
             local euler = {
                 roll = -math.deg(math.asin(newVel.z)) * distance,
                 yaw = attUtil.eulerAngle.yaw,
-                pitch = math
-                    .deg(math.asin(newVel.x)) * distance
+                pitch = math.deg(math.asin(newVel.x)) * distance
             }
             euler.roll = math.abs(euler.roll) > 70 and copysign(70, euler.roll) or euler.roll
             euler.pitch = math.abs(euler.pitch) > 70 and copysign(70, euler.pitch) or euler.pitch
-            pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
+            pdControl.rotate2Euler(euler, properties.profile[properties.profileIndex].quad_P,
+                properties.profile[properties.profileIndex].quad_D)
         else
             pdControl.rotate2Euler({
                     roll = math.deg(math.asin(joyUtil.RightStick.x)) / 1.5,
-                    yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40,
+                    yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40 / pdControl.rot_D_multiply,
                     pitch = math.deg(math.asin(joyUtil.RightStick.y) / 1.5)
                 },
-                properties.omega_P,
-                properties.omega_D)
+                properties.profile[properties.profileIndex].quad_P,
+                properties.profile[properties.profileIndex].quad_D)
         end
     else
         pdControl.quadUp(
             math.deg(math.asin(joyUtil.LeftStick.y)),
-            properties.quad_Acc,
-            properties.move_D,
+            properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+            3,
             false)
         pdControl.rotInner(
             math.deg(math.asin(joyUtil.RightStick.x)),
             math.deg(math.asin(joyUtil.LeftStick.x)),
             math.deg(math.asin(joyUtil.RightStick.y)),
-            properties.omega_P,
-            properties.omega_D)
+            properties.profile[properties.profileIndex].quad_P,
+            properties.profile[properties.profileIndex].quad_D)
     end
 end
 
 pdControl.helicopter = function()
     local acc
     local tgAg = {}
-    if modelist[3].lock then
+    if properties.profile[properties.profileIndex].lock then
         local tmpPos = {}
         tmpPos.y = attUtil.tmpFlags.helicoptLastPos.y - (attUtil.position.y + attUtil.velocity.y * 20)
         acc = tmpPos.y * 10
@@ -927,18 +1033,25 @@ pdControl.helicopter = function()
         tgAg.pitch = math.abs(tgAg.pitch) > 45 and copysign(45, tgAg.pitch) or tgAg.pitch
     else
         acc = math.deg(math.asin(joyUtil.LeftStick.y))
-        tgAg.roll = math.deg(math.asin(joyUtil.RightStick.x)) * (properties.helicopt_MAX_ANGLE / 90)
-        tgAg.yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40 * properties.helicopt_YAW_P
-        tgAg.pitch = math.deg(math.asin(joyUtil.RightStick.y)) * (properties.helicopt_MAX_ANGLE / 90)
+        tgAg.roll = math.deg(math.asin(joyUtil.RightStick.x)) *
+            (properties.profile[properties.profileIndex].helicopt_MAX_ANGLE / 90)
+        tgAg.yaw = attUtil.eulerAngle.yaw +
+            joyUtil.LeftStick.x * 40 * properties.profile[properties.profileIndex].helicopt_YAW_P
+        tgAg.pitch = math.deg(math.asin(joyUtil.RightStick.y)) *
+            (properties.profile[properties.profileIndex].helicopt_MAX_ANGLE / 90)
     end
 
     pdControl.quadUp(
         acc,
-        properties.helicopt_ACC,
-        properties.helicopt_ACC_D,
+        properties.profile[properties.profileIndex].helicopt_ACC / 4 / pdControl.rot_D_multiply,
+        properties.profile[properties.profileIndex].helicopt_ACC_D,
         true)
 
-    pdControl.rotate2Euler(tgAg, properties.helicopt_ROT_D, properties.helicopt_ROT_D)
+    pdControl.rotate2Euler(
+        tgAg,
+        0.5 * properties.profile[properties.profileIndex].helicopt_ROT_P * pdControl.helicopt_P_multiply,
+        properties.profile[properties.profileIndex].helicopt_ROT_D / pdControl.rot_D_multiply
+    )
 end
 
 pdControl.gotoPosition = function(euler, pos)
@@ -958,7 +1071,8 @@ pdControl.gotoPosition = function(euler, pos)
         1.6
     )
     if euler then
-        pdControl.rotate2Euler(euler, properties.omega_P, properties.omega_D)
+        pdControl.rotate2Euler(euler, properties.profile[properties.profileIndex].spaceShip_P,
+            properties.profile[properties.profileIndex].spaceShip_D)
     end
 end
 
@@ -985,19 +1099,21 @@ pdControl.HmsSpaceBasedGun = function()
 end
 
 pdControl.followMouse = function()
-    if joyUtil.flag then
-        if joyUtil.joy.hasUser() then
-            attUtil.tmpFlags.hmsLastAtt = scanner.commander
-        end
-    end
-    pdControl.rotate2Euler(attUtil.tmpFlags.hmsLastAtt, properties.omega_P, properties.omega_D)
+    --if joyUtil.flag then
+    --    if joyUtil.joy.hasUser() then
+    --        attUtil.tmpFlags.hmsLastAtt = scanner.commander
+    --    end
+    --end
+    attUtil.tmpFlags.hmsLastAtt = scanner.commander
+    pdControl.rotate2Euler2(attUtil.tmpFlags.hmsLastAtt, properties.profile[properties.profileIndex].spaceShip_P,
+        properties.profile[properties.profileIndex].spaceShip_D)
 
     pdControl.moveWithRot(
         math.deg(math.asin(joyUtil.BTStick.y)),
         math.deg(math.asin(joyUtil.LeftStick.y)),
         math.deg(math.asin(joyUtil.BTStick.x)),
-        properties.space_Acc,
-        properties.move_D)
+        properties.profile[properties.profileIndex].spaceShip_Acc,
+        properties.profile[properties.profileIndex].spaceShip_move_D)
 end
 
 pdControl.follow = function(target)
@@ -1016,9 +1132,13 @@ pdControl.follow = function(target)
         { roll = 0, yaw = 0, pitch = 0 }, attUtil.tmpFlags.followLastAtt)
 end
 
+pdControl.goHome = function()
+
+end
+
 pdControl.pointLoop = function()
     local tgAg, pos = {}, {}
-    pos = properties.pointList[timeUtil.pointLoopIndex]
+    pos = properties.pointList[pdControl.pointLoopIndex]
     tgAg = { roll = 0, yaw = pos.yaw, pitch = 0 }
     if pos.flip then
         tgAg.pitch = 180
@@ -1028,10 +1148,10 @@ pdControl.pointLoop = function()
         math.abs(attUtil.position.z - pos.z) < 0.5 then
         if timeUtil.pointLoopWaitTime >= properties.pointLoopWaitTime then
             timeUtil.pointLoopWaitTime = 1
-            if timeUtil.pointLoopIndex >= #properties.pointList then
-                timeUtil.pointLoopIndex = 1
+            if pdControl.pointLoopIndex >= #properties.pointList then
+                pdControl.pointLoopIndex = 1
             else
-                timeUtil.pointLoopIndex = timeUtil.pointLoopIndex + 1
+                pdControl.pointLoopIndex = pdControl.pointLoopIndex + 1
             end
         else
             timeUtil.pointLoopWaitTime = timeUtil.pointLoopWaitTime + 1
@@ -1065,13 +1185,13 @@ end
 
 function abstractScreen:onRootFatal()
     self.monitor.setTextColor(colors.white)
-    self.monitor.setBackgroundColor(colors.blue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
-    if self.monitor.setTextScale then
-        self.monitor.setTextScale(1)
-        self.monitor.write(":(")
-    end
+    --if self.monitor.setTextScale then
+    --    self.monitor.setTextScale(1)
+    --    self.monitor.write(":(")
+    --end
 end
 
 function abstractScreen:onBlank()
@@ -1086,522 +1206,1092 @@ end
 
 function abstractScreen:report() end
 
+------------Window------------
+local abstractWindow, abstractMonitor, flightPages = {}, {}, {}
+
+function abstractWindow:init() end
+
+function abstractWindow:new(parent, nX, nY, nWidth, nHeight, visible)
+    self.window = window.create(parent, nX, nY, nWidth, nHeight, visible)
+end
+
+function abstractWindow:refreshButtons(cut, page) --没有参数时打印所有按钮，有参数时：cut前面的正常打印，cut后面的开始翻页
+    if not self.buttons then
+        for i = 1, #self.buttons, 1 do
+            self.buttons[i].x = math.floor(self.buttons[i].x)
+            self.buttons[i].y = math.floor(self.buttons[i].y)
+        end
+    end
+    if not cut then
+        cut = #self.buttons
+    end
+    if self.window.isVisible() then
+        self:clear()
+        for i = 1, cut, 1 do
+            local bt = self.buttons[i]
+            self.window.setCursorPos(bt.x, bt.y)
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+    end
+
+    if page then
+        local start = (page - 1) * (self.height - 4) + 1 + cut
+        for i = start, page * (self.height - 4) + cut, 1 do
+            if i > #self.buttons then break end
+            local bt = self.buttons[i]
+            self.window.setCursorPos(bt.x, bt.y - (page - 1) * (self.height - 4))
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+    end
+end
+
+function abstractWindow:clear()
+    self.window.setBackgroundColor(getColorDec(properties.bg))
+    self.window.clear()
+    self.window.setCursorPos(1, 1)
+end
+
+function abstractWindow:switchWindow(index)
+    local result = properties.winIndex[self.name][self.row][self.column] + index
+    if result > 4 then
+        result = 1
+    elseif result == 0 then
+        result = 4
+    end
+    properties.winIndex[self.name][self.row][self.column] = result
+    return result
+end
+
+function abstractWindow:nextPage(x, y)
+    if y == 1 then
+        if x < self.width / 2 then
+            return self:switchWindow(-1)
+        elseif x > self.width / 2 then
+            return self:switchWindow(1)
+        end
+    end
+end
+
+function abstractWindow:subPage_Back(x, y)
+    if x == 1 and y == 1 then
+        system.updatePersistentData()
+        properties.winIndex[self.name][self.row][self.column] = self.indexFlag
+    end
+end
+
+function abstractWindow:refreshTitle()
+    self.window.setCursorPos(3, 1)
+    self.window.blit(self.pageName, genStr(properties.title, #self.pageName), genStr(properties.bg, #self.pageName))
+end
+
+local page_attach_manager = {}
+local modPage             = setmetatable({ pageId = 1, pageName = "modPage" }, { __index = abstractWindow })
+local autoPage            = setmetatable({ pageId = 2, pageName = "autoPage" }, { __index = abstractWindow })
+local attPage             = setmetatable({ pageId = 3, pageName = "attPage" }, { __index = abstractWindow })
+local setPage             = setmetatable({ pageId = 4, pageName = "setPage" }, { __index = abstractWindow })
+local set_spaceShip       = setmetatable({ pageId = 5, pageName = "set_spaceShip" }, { __index = abstractWindow })
+local set_quadFPV         = setmetatable({ pageId = 6, pageName = "set_quadFPV" }, { __index = abstractWindow })
+local set_helicopter      = setmetatable({ pageId = 7, pageName = "set_helicopter" }, { __index = abstractWindow })
+local set_user            = setmetatable({ pageId = 8, pageName = "user_Change" }, { __index = abstractWindow })
+local set_home            = setmetatable({ pageId = 9, pageName = "home_set" }, { __index = abstractWindow })
+local set_simulate        = setmetatable({ pageId = 10, pageName = "simulate" }, { __index = abstractWindow })
+local set_att             = setmetatable({ pageId = 11, pageName = "set_att" }, { __index = abstractWindow })
+local set_profile         = setmetatable({ pageId = 12, pageName = "profile" }, { __index = abstractWindow })
+local set_colortheme      = setmetatable({ pageId = 13, pageName = "colortheme" }, { __index = abstractWindow })
+local controllPage        = setmetatable({ pageId = 14, pageName = "controllPage" }, { __index = abstractWindow })
+
+flightPages               = {
+    modPage,        --1
+    autoPage,       --2
+    attPage,        --3
+    setPage,        --4
+    set_spaceShip,  --5
+    set_quadFPV,    --6
+    set_helicopter, --7
+    set_user,       --8
+    set_home,       --9
+    set_simulate,   --10
+    set_att,        --11
+    set_profile,    --12
+    set_colortheme, --13
+    controllPage    --14
+}
+
+--winIndex = 1
+function modPage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.buttons = {
+        { text = "<    MOD    >",  x = self.width / 2 - 6, y = 1,               blitF = genStr(title, 13),               blitB = genStr(bg, 13) },
+        { text = "[|]",            x = 3,                  y = self.height - 1, blitF = "eee",                           blitB = genStr(bg, 3) },
+        { text = "[R]",            x = 6,                  y = self.height - 1, blitF = "222",                           blitB = genStr(bg, 3) },
+        { text = "[x]",            x = self.width - 5,     y = self.height - 1, blitF = "888",                           blitB = genStr(bg, 3) },
+        { text = modelist[1].name, x = 2,                  y = 3,               blitF = genStr(font, #modelist[1].name), blitB = genStr(bg, #modelist[1].name), modeId = 1, select = genStr(select, #modelist[1].name) },
+        { text = modelist[2].name, x = 2,                  y = 4,               blitF = genStr(font, #modelist[2].name), blitB = genStr(bg, #modelist[2].name), modeId = 2, select = genStr(select, #modelist[2].name) },
+        { text = modelist[3].name, x = 2,                  y = 5,               blitF = genStr(font, #modelist[3].name), blitB = genStr(bg, #modelist[3].name), modeId = 3, select = genStr(select, #modelist[3].name) },
+        { text = modelist[4].name, x = 2,                  y = 6,               blitF = genStr(font, #modelist[4].name), blitB = genStr(bg, #modelist[4].name), modeId = 4, select = genStr(select, #modelist[4].name) },
+    }
+end
+
+function modPage:refresh()
+    self:refreshButtons()
+    for k, v in pairs(self.buttons) do
+        if v.text == modelist[properties.mode].name then
+            self.window.setCursorPos(v.x, v.y)
+            self.window.blit(v.text, v.blitB, v.select)
+        end
+    end
+end
+
+function modPage:onTouch(x, y)
+    self:nextPage(x, y)
+    for k, v in pairs(self.buttons) do
+        if x >= v.x and x < v.x + #v.text and y == v.y then
+            if v == self.buttons[2] or v == self.buttons[3] then
+                system.updatePersistentData()
+                monitorUtil.onRootFatal()
+                local result = v == self.buttons[2] and os.shutdown() or os.reboot()
+            elseif v == self.buttons[4] then
+                monitorUtil.disconnect(self.name)
+            elseif v.modeId then
+                properties.mode = v.modeId
+            end
+        end
+    end
+end
+
+--winIndex = 2
+function autoPage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.buttons = {
+        { text = "<  AUTOMOD  >",  x = self.width / 2 - 6, y = 1, blitF = genStr(title, 13),               blitB = genStr(bg, 13) },
+        { text = modelist[5].name, x = 2,                  y = 3, blitF = genStr(font, #modelist[5].name), blitB = genStr(bg, #modelist[5].name), select = genStr(select, #modelist[5].name), modeId = 5 },
+        { text = modelist[6].name, x = 2,                  y = 4, blitF = genStr(font, #modelist[6].name), blitB = genStr(bg, #modelist[6].name), select = genStr(select, #modelist[6].name), modeId = 6 },
+        { text = modelist[7].name, x = 2,                  y = 5, blitF = genStr(font, #modelist[7].name), blitB = genStr(bg, #modelist[7].name), select = genStr(select, #modelist[7].name), modeId = 7 },
+    }
+end
+
+function autoPage:refresh()
+    self:refreshButtons()
+    for k, v in pairs(self.buttons) do
+        if v.text == modelist[properties.mode].name then
+            self.window.setCursorPos(v.x, v.y)
+            self.window.blit(v.text, v.blitB, v.select)
+        end
+    end
+end
+
+function autoPage:onTouch(x, y)
+    self:nextPage(x, y)
+    for k, v in pairs(self.buttons) do
+        if x >= v.x and x < v.x + #v.text and y == v.y then
+            if v.modeId then
+                properties.mode = v.modeId
+            end
+        end
+    end
+end
+
+--winIndex = 4
+function setPage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.buttons = {
+        { text = "<    SET    >", x = self.width / 2 - 6, y = 1,       blitF = genStr(title, 13), blitB = genStr(bg, 13) },
+        { text = "S_SpaceShip",   x = 2, pageId = 5,  y = 3,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_QuadFPV  ",   x = 2, pageId = 6,  y = 4,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_Helicopt ",   x = 2, pageId = 7,  y = 5,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "User_Change",   x = 2, pageId = 8,  y = 6,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Home_Set   ",   x = 2, pageId = 9,  y = 7,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Simulate   ",   x = 2, pageId = 10, y = 8,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Set_Att    ",   x = 2, pageId = 11, y = 9,  blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Profile    ",   x = 2, pageId = 12, y = 10, blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Colortheme ",   x = 2, pageId = 13, y = 11, blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false }
+    }
+    self.otherButtons = {
+        { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+        { text = "      ^      ", x = 2, y = 2,               blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+    }
+    self.pageIndex = 1
+end
+
+function setPage:refresh()
+    self:refreshButtons(1, self.pageIndex)
+    if #self.buttons > self.height - 4 then
+        if self.pageIndex == 1 or self.pageIndex * (self.height - 4) < #self.buttons - 1 then
+            local bt = self.otherButtons[1]
+            self.window.setCursorPos(bt.x, bt.y)
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+        if self.pageIndex > 1 then
+            local bt = self.otherButtons[2]
+            self.window.setCursorPos(bt.x, bt.y)
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+    end
+    for k, v in pairs(self.buttons) do
+        if v.selected then
+            local yPos = v.y - (self.pageIndex - 1) * (self.height - 4)
+            if yPos > 2 and yPos < self.height - 1 then
+                self.window.setCursorPos(v.x, v.y - (self.pageIndex - 1) * (self.height - 4))
+                self.window.blit(v.text, v.blitB, v.select)
+            end
+        end
+    end
+end
+
+function setPage:onTouch(x, y)
+    self:nextPage(x, y)
+    if y == 2 then
+        if self.pageIndex > 1 then
+            self.pageIndex = self.pageIndex - 1
+        end
+    elseif y < self.height - 1 and y > 2 then
+        for k, v in pairs(self.buttons) do
+            if v.y > 1 then
+                if x >= v.x and x < v.x + #v.text and y == v.y - (self.pageIndex - 1) * (self.height - 4) then
+                    if not v.selected then
+                        v.selected = true
+                    else
+                        self.windows[self.row][self.column][v.pageId].indexFlag = 4
+                        properties.winIndex[self.name][self.row][self.column] = v.pageId
+                    end
+                else
+                    v.selected = false
+                end
+            end
+        end
+    elseif y == self.otherButtons[1].y then
+        if #self.buttons - 1 > self.pageIndex * (self.height - 4) then
+            self.pageIndex = self.pageIndex + 1
+        else
+            self.pageIndex = 1
+        end
+    end
+end
+
+--winIndex = 3
+function attPage:init()
+end
+
+function attPage:refresh()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos
+    if info ~= -1 then
+        --self.window.setCursorPos(self.width / 2 - 3, self.height / 2 - 3)
+        --self.window.write("group=" .. info.group)
+        --self.window.setCursorPos(self.width / 2 - 6, self.height / 2 - 1)
+        --self.window.write(("row=%d, max=%d" ):format(info.row, info.maxRow))
+        --self.window.setCursorPos(self.width / 2 - 8, self.height / 2 + 1)
+        --self.window.write(("column=%d, max=%d" ):format(info.column, info.maxColumn))
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+        if info.row == 1 then yPos = yPos + 1 end
+    else
+        width, height, xPos, yPos = self.width, self.height, 1, 1
+    end
+    self.window.setBackgroundColor(getColorDec(properties.bg))
+    self.window.clear()
+    self.window.setCursorPos(1, 1)
+    if yPos == 1 then
+        for i = 1, self.width, 1 do
+            self.window.setCursorPos(i, 1)
+            self.window.blit(".", font, bg)
+        end
+
+        local xMid = width / 2
+        local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * xMid + 0.5)
+        local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * xMid + 0.5)
+        if attUtil.pX.x > 0 then
+            self.window.setCursorPos(xMid + zPoint - xPos, 1)
+            self.window.blit("W", select, bg)
+        else
+            self.window.setCursorPos(xMid - zPoint - xPos, 1)
+            self.window.blit("E", select, bg)
+        end
+
+        if attUtil.pX.z > 0 then
+            self.window.setCursorPos(xMid + xPoint - xPos, 1)
+            self.window.blit("N", select, bg)
+        else
+            self.window.setCursorPos(xMid - xPoint - xPos, 1)
+            self.window.blit("S", select, bg)
+        end
+    end
+
+    local yMid = height / 2
+    local lPointy = math.abs(attUtil.eulerAngle.pitch) > 90 and attUtil.pZ.y or -attUtil.pZ.y
+    lPointy = math.floor(lPointy * yMid + 0.5)
+    lPointy = math.abs(lPointy) > yMid - 1 and copysign(yMid - 1, lPointy) or lPointy
+    local xPointy = math.abs(attUtil.eulerAngle.pitch) > 90 and attUtil.pX.y or -attUtil.pX.y
+    xPointy = yMid + math.floor(xPointy * height + 0.5)
+    local lline, rline = width * 0.33 - xPos + 2, width * 0.66 - xPos + 2
+    for i = 1, height, 1 do
+        local yy = i - yPos + 2
+        if yPos > 1 then
+            yy = yy - 1
+        end
+        if yy > 0 then
+            self.window.setCursorPos(lline - 2, yy)
+            if i == yMid + lPointy then
+                self.window.blit("-", font, bg)
+            end
+            self.window.setCursorPos(lline, yy)
+            if i == xPointy then
+                self.window.blit(">-", font .. select, genStr(bg, 2))
+            else
+                self.window.setCursorPos(lline + 1, yy)
+                self.window.blit("-", font, bg)
+            end
+
+            self.window.setCursorPos(rline + 3, yy)
+            if i == yMid - lPointy then
+                self.window.blit("-", font, bg)
+            end
+            self.window.setCursorPos(rline, yy)
+            if i == xPointy then
+                self.window.blit("-<", font .. select, genStr(bg, 2))
+            else
+                self.window.blit("-", font, bg)
+            end
+        end
+    end
+    if xPointy < 2 and yPos == 1 then
+        self.window.setCursorPos(lline, 2)
+        self.window.blit("^", font, bg)
+        self.window.setCursorPos(rline + 1, 2)
+        self.window.blit("^", font, bg)
+    elseif xPointy > height - 1 then
+        if info ~= -1 then
+            if info.row ~= info.maxRow then goto continue end
+        end
+        self.window.setCursorPos(lline, self.height)
+        self.window.blit("v", font, bg)
+        self.window.setCursorPos(rline + 1, self.height)
+        self.window.blit("v", font, bg)
+    end
+    ::continue::
+    local mod = modelist[properties.mode].name
+    if info ~= -1 then
+        if info.maxColumn > 1 then
+            local x, y = width / 2 - xPos, height / 2 - yPos
+            if yPos > 1 then y = y - 1 end
+
+            self.window.setCursorPos(x - #mod / 2 + 2, yPos + 1)
+            self.window.blit(mod, genStr(title, #mod), genStr(bg, #mod))
+            if mod == "spaceShip" and joyUtil.LeftJoyClick then
+                self.window.setCursorPos(x - 3, y)
+                self.window.blit("!BURNING!", "fffffffff", "eeeeeeeee")
+            else
+                self.window.setCursorPos(x - 3, y - 1)
+                self.window.blit(("ROLL %6.1f"):format(attUtil.eulerAngle.roll), genStr(other, 11), genStr(bg, 11))
+                self.window.setCursorPos(x - 3, y)
+                self.window.blit(("YAW  %6.1f"):format(attUtil.eulerAngle.yaw), genStr(other, 11), genStr(bg, 11))
+                self.window.setCursorPos(x - 3, y + 1)
+                self.window.blit(("PITCH%6.1f"):format(attUtil.eulerAngle.pitch), genStr(other, 11), genStr(bg, 11))
+            end
+            self.window.setCursorPos(x - 2, y + 2)
+            self.window.blit("tuning >", genStr(bg, 8), genStr(select, 8))
+            self.window.setCursorPos(x - 2, y + 3)
+            if properties.profile[properties.profileIndex].lock then
+                self.window.blit("LOCK  ON", genStr(bg, 8), genStr(other, 8))
+            else
+                self.window.blit("LOCK OFF", genStr(other, 8), genStr(bg, 8))
+            end
+
+            self.window.setCursorPos(x - 3, y + 4)
+            self.window.blit(("%6.1f km/h"):format(attUtil.speed * 3.6), genStr(select, 11), genStr(bg, 11))
+            self.window.setCursorPos(x - 3, y + 5)
+            self.window.blit(("H   %5.1f m"):format(attUtil.position.y), genStr(select, 11), genStr(bg, 11))
+
+            if info.maxColumn > 2 then
+                self.window.setCursorPos(x - self.width - joyUtil.LeftStick.x * (self.width / 2 - 2), y + 2 - joyUtil.LeftStick.y * (height / 2 - 1))
+                self.window.blit("*", font, select)
+                self.window.setCursorPos(x + self.width + 3 - joyUtil.RightStick.x * (self.width / 2 - 2), y + 2 - joyUtil.RightStick.y * (height / 2 - 1))
+                self.window.blit("*", font, select)
+
+                for i = 1, joyUtil.LT * height - 2, 1 do
+                    self.window.setCursorPos(x - 5, height - yPos - i + 1)
+                    self.window.blit("^", bg, font)
+                end
+                for i = 1, joyUtil.RT * height - 2, 1 do
+                    self.window.setCursorPos(x + 9, height - yPos - i + 1)
+                    self.window.blit("^", bg, font)
+                end
+            end
+            
+        end
+    end
+end
+
+function attPage:onTouch(x, y)
+    self:nextPage(x, y)
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos
+    if info ~= -1 then
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+        if info.row == 1 then yPos = yPos + 1 end
+    else
+        width, height, xPos, yPos = self.width, self.height, 1, 1
+    end
+    local mod = modelist[properties.mode].name
+    local bx, by = width / 2 - xPos - 2, height / 2 - yPos + 2
+    if yPos > 1 then y = y - 1 end
+    if y == by and x >= bx and x <= bx + 8 then
+        local index
+        if mod == "spaceShip" then index = 5
+        elseif mod == "quadFPV" then index = 6
+        elseif mod == "helicopter" then index = 7
+        end
+        if index then
+            self.windows[self.row][self.column][index].indexFlag = 3
+            properties.winIndex[self.name][self.row][self.column] = index
+        end
+    elseif y == by + 1 and x >= bx and x <= bx + 8 then
+        properties.profile[properties.profileIndex].lock = not properties.profile[properties.profileIndex].lock
+    end
+end
+
+--winIndex = 5
+function set_spaceShip:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                           blitB = bg },
+        { text = "P: --      ++", x = 2, y = 3, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
+        { text = "D: --      ++", x = 2, y = 4, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
+        { text = "Forward -   +", x = 2, y = 6, blitF = genStr(font, 8) .. "fffff",      blitB = genStr(bg, 8) .. "b" .. genStr(bg, 3) .. "e" },
+        { text = "SideMove-   +", x = 2, y = 7, blitF = genStr(font, 8) .. "fffff",      blitB = genStr(bg, 8) .. "b" .. genStr(bg, 3) .. "e" },
+        { text = "MOVE_D: -   +", x = 2, y = 8, blitF = genStr(font, 8) .. "fffff",      blitB = genStr(bg, 8) .. "b" .. genStr(bg, 3) .. "e" },
+        { text = "Burner: -   +", x = 2, y = 9, blitF = genStr(font, 8) .. "fffff",      blitB = genStr(bg, 8) .. "b" .. genStr(bg, 3) .. "e" }
+    }
+end
+
+function set_spaceShip:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setCursorPos(1, 2)
+    self.window.blit(("profile:%s"):format(properties.profileIndex), genStr(properties.other, 16),
+        genStr(properties.bg, 16))
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(8, 3)
+    self.window.write(string.format("%0.2f", profile.spaceShip_P))
+    self.window.setCursorPos(8, 4)
+    self.window.write(string.format("%0.2f", profile.spaceShip_D))
+    self.window.setCursorPos(11, 6)
+    self.window.write(string.format("%0.1f", profile.spaceShip_Acc))
+    self.window.setCursorPos(11, 7)
+    self.window.write(string.format("%0.1f", profile.spaceShip_SideMove))
+    self.window.setCursorPos(11, 8)
+    self.window.write(string.format("%0.1f", profile.spaceShip_move_D))
+    self.window.setCursorPos(11, 9)
+    self.window.write(string.format("%0.1f", profile.spaceShip_Burner))
+end
+
+function set_spaceShip:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if y == 3 or y == 4 then
+            if x == 5 then result = -0.1 end
+            if x == 6 then result = -0.01 end
+            if x == 13 then result = 0.01 end
+            if x == 14 then result = 0.1 end
+            if y == 3 then
+                profile.spaceShip_P = profile.spaceShip_P + result
+            elseif y == 4 then
+                profile.spaceShip_D = profile.spaceShip_D + result
+            end
+        elseif y > 5 then
+            if x == 10 then result = -0.1 end
+            if x == 14 then result = 0.1 end
+            if y == 6 then
+                profile.spaceShip_Acc = profile.spaceShip_Acc + result < 0 and 0 or profile.spaceShip_Acc + result
+            elseif y == 7 then
+                profile.spaceShip_SideMove = profile.spaceShip_SideMove + result < 0 and 0 or
+                    profile.spaceShip_SideMove + result
+            elseif y == 8 then
+                profile.spaceShip_move_D = profile.spaceShip_move_D + result < 0 and 0 or
+                    profile.spaceShip_move_D + result
+            elseif y == 9 then
+                profile.spaceShip_Burner = profile.spaceShip_Burner + result < 0 and 0 or
+                    profile.spaceShip_Burner + result
+            end
+        end
+    end
+end
+
+--winIndex = 6
+function set_quadFPV:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                           blitB = bg },
+        { text = "P: --      ++", x = 2, y = 3, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
+        { text = "D: --      ++", x = 2, y = 4, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
+        { text = "ACC--      ++", x = 2, y = 5, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
+        { text = "rate         ", x = 2, y = 7, blitF = genStr(font, 13),                blitB = genStr(bg, 13),                                select = genStr(select, 13), selected = false, flag = false },
+        { text = "AccRate      ", x = 2, y = 8, blitF = genStr(font, 13),                blitB = genStr(bg, 13),                                select = genStr(select, 13), selected = false, flag = false }
+    }
+end
+
+function set_quadFPV:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    for k, v in pairs(self.buttons) do
+        if v.selected then
+            self.window.setCursorPos(v.x, v.y)
+            self.window.blit(v.text, v.blitB, v.select)
+        end
+    end
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(1, 2)
+    self.window.blit(("profile:%s"):format(properties.profileIndex), genStr(properties.other, 16),
+        genStr(properties.bg, 16))
+    self.window.setCursorPos(8, 3)
+    self.window.write(string.format("%0.2f", profile.quad_P))
+    self.window.setCursorPos(8, 4)
+    self.window.write(string.format("%0.2f", profile.quad_D))
+    self.window.setCursorPos(8, 5)
+    self.window.write(string.format("%0.2f", profile.quad_Acc))
+end
+
+function set_quadFPV:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if y > 2 and y < 6 then
+            if x == 5 then result = -0.1 end
+            if x == 6 then result = -0.01 end
+            if x == 13 then result = 0.01 end
+            if x == 14 then result = 0.1 end
+            if y == 3 then
+                profile.quad_P = profile.quad_P + result < 0 and 0 or profile.quad_P + result
+            elseif y == 4 then
+                profile.quad_D = profile.quad_D + result < 0 and 0 or profile.quad_P + result
+            elseif y == 5 then
+                profile.quad_Acc = profile.quad_Acc + result < 0 and 0 or profile.quad_P + result
+            end
+        end
+    end
+    for k, v in pairs(self.buttons) do
+        if v.selected ~= nil then
+            if x >= v.x and x < v.x + #v.text and y == v.y then
+                if not v.selected then
+                    v.selected = true
+                else
+                    if v.text == "rate         " then
+                        --?.indexFlag = 6
+                        --properties.winIndex[self.name][self.row][self.column] = ?
+                    elseif v.text == "AccRate      " then
+                        --?.indexFlag = 6
+                        --properties.winIndex[self.name][self.row][self.column] = ?
+                    end
+                end
+            else
+                v.selected = false
+            end
+        end
+    end
+end
+
+--winIndex = 7
+function set_helicopter:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                         blitB = bg },
+        { text = "Yaw_P--    ++", x = 2, y = 3, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "Rot_P--    ++", x = 2, y = 4, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "Rot_D--    ++", x = 2, y = 5, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "ACC:-   +",     x = 2, y = 6, blitF = genStr(font, 4) .. "fffff",    blitB = genStr(bg, 4) .. "b" .. genStr(bg, 3) .. "e" },
+        { text = "Acc_D--    ++", x = 2, y = 7, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "MaxAngle:-  +", x = 2, y = 9, blitF = genStr(font, 9) .. "ffff",     blitB = genStr(bg, 9) .. "b" .. genStr(bg, 2) .. "e" }
+    }
+end
+
+function set_helicopter:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setCursorPos(1, 2)
+    self.window.blit(("profile:%s"):format(properties.profileIndex), genStr(properties.other, 16),
+        genStr(properties.bg, 16))
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(9, 3)
+    self.window.write(string.format("%0.2f", profile.helicopt_YAW_P))
+    self.window.setCursorPos(9, 4)
+    self.window.write(string.format("%0.2f", profile.helicopt_ROT_P))
+    self.window.setCursorPos(9, 5)
+    self.window.write(string.format("%0.2f", profile.helicopt_ROT_D))
+    self.window.setCursorPos(7, 6)
+    self.window.write(string.format("%0.1f", profile.helicopt_ACC))
+    self.window.setCursorPos(9, 7)
+    self.window.write(string.format("%0.2f", profile.helicopt_ACC_D))
+    self.window.setCursorPos(12, 9)
+    self.window.write(string.format("%d", profile.helicopt_MAX_ANGLE))
+end
+
+function set_helicopter:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if (y > 2 and y < 6) or y == 7 then
+            if x == 7 then result = -0.1 end
+            if x == 8 then result = -0.01 end
+            if x == 13 then result = 0.01 end
+            if x == 14 then result = 0.1 end
+            if y == 3 then
+                profile.helicopt_YAW_P = profile.helicopt_YAW_P + result < 0 and 0 or profile.helicopt_YAW_P + result
+            elseif y == 4 then
+                profile.helicopt_ROT_P = profile.helicopt_ROT_P + result < 0 and 0 or profile.helicopt_ROT_P + result
+            elseif y == 5 then
+                profile.helicopt_ROT_D = profile.helicopt_ROT_D + result < 0 and 0 or profile.helicopt_ROT_D + result
+            elseif y == 7 then
+                profile.helicopt_ACC_D = profile.helicopt_ACC_D + result < 0 and 0 or profile.helicopt_ACC_D + result
+            end
+        elseif y == 6 then
+            if x == 6 then result = -0.1 end
+            if x == 10 then result = 0.1 end
+            profile.helicopt_ACC = profile.helicopt_ACC + result < 0 and 0 or profile.helicopt_ACC + result
+        elseif y == 9 then
+            if x == 11 then result = -1 end
+            if x == 14 then result = 1 end
+            profile.helicopt_MAX_ANGLE = profile.helicopt_MAX_ANGLE + result < 0 and 0 or
+                profile.helicopt_MAX_ANGLE + result
+            profile.helicopt_MAX_ANGLE = profile.helicopt_MAX_ANGLE > 60 and 60 or profile.helicopt_MAX_ANGLE
+        end
+    end
+end
+
+--winIndex = 8
+function set_user:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",           x = 1, y = 1, blitF = title,             blitB = bg },
+        { text = "selectUser:", x = 2, y = 2, blitF = genStr(other, 11), blitB = genStr(bg, 11) },
+    }
+end
+
+function set_user:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local bg, font, select = properties.bg, properties.font, properties.select
+    for i = 1, 7, 1 do
+        if properties.mode ~= 4 and properties.mode ~= 5 then scanner.scanPlayer() end
+        if scanner.playerList[i] then
+            local name = scanner.playerList[i].name
+            self.window.setCursorPos(2, 2 + i)
+            if name == properties.userName then
+                self.window.blit(name, genStr(bg, #name), genStr(select, #name))
+            else
+                self.window.blit(name, genStr(font, #name), genStr(bg, #name))
+            end
+        end
+    end
+end
+
+function set_user:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if y > 2 and y < 10 then
+        local user = scanner.playerList[y - 2]
+        if user then
+            properties.userName = user.name
+        end
+    end
+end
+
+--winIndex = 9
+function set_home:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<", x = 1, y = 1, blitF = title, blitB = bg }
+    }
+end
+
+function set_home:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+end
+
+function set_home:onTouch(x, y)
+    self:subPage_Back(x, y)
+end
+
+--winIndex = 10
+function set_simulate:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "AirMass-    +", x = 1, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "Gravity-    +", x = 1, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "0_Point-    +", x = 1, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+
+function set_simulate:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local bg, other, font = properties.bg, properties.other, properties.font
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(3, 1)
+    self.window.blit(self.pageName, genStr(properties.title, #self.pageName), genStr(bg, #self.pageName))
+    self.window.setCursorPos(9, 3)
+    self.window.write(string.format("%0.1f", properties.airMass))
+    self.window.setCursorPos(9, 5)
+    self.window.write(string.format("%0.1f", properties.gravity))
+    self.window.setCursorPos(9, 7)
+    self.window.write(string.format("%0.1f", properties.zeroPoint))
+end
+
+function set_simulate:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 and y < 10 then
+        local result = 0
+        if x == 8 then result = -0.1 end
+        if x == 13 then result = 0.1 end
+        if y == 3 then
+            properties.airMass = properties.airMass + result < 0 and 0 or properties.airMass + result
+        elseif y == 5 then
+            properties.gravity = properties.gravity + result > 0 and 0 or properties.gravity + result
+        elseif y == 7 then
+            properties.zeroPoint = properties.zeroPoint + result < 0 and 0 or properties.zeroPoint + result
+        end
+    end
+end
+
+--winIndex = 11
+function set_att:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<", x = 1,                  y = 1,                   blitF = title, blitB = bg },
+        { text = "w", x = self.width / 2 - 5, y = self.height / 2,     blitF = font,  blitB = bg },
+        { text = "n", x = self.width / 2,     y = self.height / 2 - 3, blitF = font,  blitB = bg },
+        { text = "e", x = self.width / 2 + 5, y = self.height / 2,     blitF = font,  blitB = bg },
+        { text = "s", x = self.width / 2,     y = self.height / 2 + 3, blitF = font,  blitB = bg }
+    }
+end
+
+function set_att:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local index
+    if properties.shipFace == "west" then
+        index = 2
+    elseif properties.shipFace == "north" then
+        index = 3
+    elseif properties.shipFace == "east" then
+        index = 4
+    elseif properties.shipFace == "south" then
+        index = 5
+    end
+
+    self.window.setCursorPos(self.buttons[index].x, self.buttons[index].y)
+    self.window.blit(self.buttons[index].text, properties.bg, properties.select)
+end
+
+function set_att:onTouch(x, y)
+    self:subPage_Back(x, y)
+    for k, v in pairs(self.buttons) do
+        if x == v.x and y == v.y then
+            if v.text == "w" then
+                properties.shipFace = "west"
+            elseif v.text == "n" then
+                properties.shipFace = "north"
+            elseif v.text == "e" then
+                properties.shipFace = "east"
+            elseif v.text == "s" then
+                properties.shipFace = "south"
+            end
+        end
+    end
+end
+
+--winIndex = 12
+function set_profile:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",        x = 1, y = 1, blitF = title,           blitB = bg },
+        { text = "keyboard", x = 2, y = 3, blitF = genStr(font, 8), blitB = genStr(bg, 8) },
+        { text = "joyStick", x = 2, y = 4, blitF = genStr(font, 8), blitB = genStr(bg, 8) }
+    }
+end
+
+function set_profile:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    if properties.profileIndex == "keyboard" then
+        self.window.setCursorPos(self.buttons[2].x, self.buttons[2].y)
+        self.window.blit(self.buttons[2].text, genStr(properties.bg, 8), genStr(properties.select, 8))
+    else
+        self.window.setCursorPos(self.buttons[3].x, self.buttons[3].y)
+        self.window.blit(self.buttons[3].text, genStr(properties.bg, 8), genStr(properties.select, 8))
+    end
+end
+
+function set_profile:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 1 and x < 10 then
+        if y == 3 then
+            properties.profileIndex = "keyboard"
+        elseif y == 4 then
+            properties.profileIndex = "joyStick"
+        end
+    end
+end
+
+--winIndex = 13
+function set_colortheme:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",          x = 1, y = 1, blitF = title,            blitB = bg },
+        { text = "font      ", x = 4, y = 3, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(font, 2) },
+        { text = "background", x = 4, y = 4, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(bg, 2) },
+        { text = "title     ", x = 4, y = 5, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(title, 2) },
+        { text = "select    ", x = 4, y = 6, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(select, 2) },
+        { text = "other     ", x = 4, y = 7, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(other, 2) },
+    }
+end
+
+function set_colortheme:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    for i = 2, 6, 1 do
+        self.window.setCursorPos(2, self.buttons[i].y)
+        self.window.blit("  ", "00", self.buttons[i].prt)
+    end
+end
+
+function set_colortheme:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x < 4 then
+        if y == 3 then
+            properties.font = getNextColor(properties.font, 1)
+        elseif y == 4 then
+            properties.bg = getNextColor(properties.bg, 1)
+        elseif y == 5 then
+            properties.title = getNextColor(properties.title, 1)
+        elseif y == 6 then
+            properties.select = getNextColor(properties.select, 1)
+        elseif y == 7 then
+            properties.other = getNextColor(properties.other, 1)
+        end
+    end
+    self:init()
+end
+
+abstractMonitor = setmetatable({}, { __index = abstractScreen })
+
+function abstractMonitor:getWindowCount()
+    self.width, self.height = self.monitor.getSize()
+    self.xCount = math.floor((self.width + 6) / 21.25 + 0.1)
+    self.yCount = math.floor((self.height + 4) / 14.25 + 0.1)
+end
+
+function abstractMonitor:init()
+    if self.monitor then
+        if not self.name == "computer" then self.monitor.setTextScale(0.5) end
+        self.monitor.setBackgroundColor(getColorDec(properties.bg))
+        self.monitor.clear()
+        self:getWindowCount()
+        self.windows = {}
+        self.winCount = 0
+        local width, height = self.width / self.xCount, self.height / self.yCount
+        width, height = math.floor(width), math.floor(height)
+        local xP, yP = 1, 1
+        for i = 1, self.yCount, 1 do
+            table.insert(self.windows, {})
+            for j = 1, self.xCount, 1 do
+                table.insert(self.windows[i], {})
+                self.winCount = self.winCount + 1
+                for k = 1, #flightPages, 1 do
+                    local tmpt = setmetatable(
+                        {
+                            name = self.name,
+                            windows = self.windows,
+                            winNum = self.winCount,
+                            width = width,
+                            height =
+                                height,
+                            row = i,
+                            column = j
+                        },
+                        { __index = flightPages[k] }
+                    )
+                    xP = j > 1 and math.floor((j - 1) * width + 1.5) or 1
+                    yP = i > 1 and math.floor((i - 1) * height + 1.5) or 1
+                    tmpt:new(self.monitor, xP, yP, width, height, false)
+                    tmpt:init()
+                    table.insert(self.windows[i][j], tmpt)
+                end
+            end
+        end
+
+        if not properties.winIndex[self.name] then
+            properties.winIndex[self.name] = {}
+        end
+        for i = 1, #self.windows, 1 do
+            if not properties.winIndex[self.name][i] then
+                properties.winIndex[self.name][i] = {}
+            end
+            for j = 1, #self.windows[i], 1 do
+                if not properties.winIndex[self.name][i][j] then
+                    properties.winIndex[self.name][i][j] = 1
+                end
+            end
+        end
+    end
+end
+
+function page_attach_manager:get(mName, pageName, row, column)
+    if self[mName] then
+        for k, v in pairs(self[mName][pageName]) do
+            if (row >= v.rowStart and row <= v.rowEnd) and (column >= v.columnStart and column <= v.columnEnd) then
+                return {
+                    group = v.group,
+                    row = row + 1 - v.rowStart,
+                    maxRow = v.rowEnd + 1 - v.rowStart,
+                    column = column + 1 - v.columnStart,
+                    maxColumn = v.columnEnd + 1 - v.columnStart
+                }
+            end
+        end
+    end
+    return -1
+end
+
+function page_attach_manager:test()
+    for k, v in pairs(self["monitor_12"]) do
+        for k2, v2 in pairs(v) do
+            commands.execAsync(("say %s=%s"):format(k, v))
+        end
+    end
+end
+
+function abstractMonitor:refresh_page_attach()
+    if not page_attach_manager[self.name] then
+        page_attach_manager[self.name] = {}
+    end
+    local att = {}
+    page_attach_manager[self.name]["attPage"] = att
+    local wi = 1
+    local group = 0
+    while true do --总行数
+        if wi > #self.windows then break end
+        local minRowAdd = 0
+        local wj = 1
+        while true do --总列数
+            if wj > #self.windows[1] then break end
+            local rowStart, columnStart = wi, wj
+            local rowEnd = rowStart + 2 > #self.windows and #self.windows or rowStart + 2
+            local columnEnd = columnStart + 2 > #self.windows[1] and #self.windows[1] or columnStart + 2
+            local rowCount, columnCount = 0, 0
+            for i = rowStart, rowEnd, 1 do
+                local j = columnStart
+                while true do
+                    if j > columnEnd then break end
+                    if properties.winIndex[self.name][i][j] == 3 then --attPage = 3
+                        if i == rowStart then columnCount = columnCount + 1 end
+                    else
+                        if i == rowStart and columnCount > 0 then
+                            columnEnd = j - 1
+                        elseif j < columnEnd + 1 then
+                            goto continue
+                        end
+                    end
+                    j = j + 1
+                end
+                rowCount = rowCount + 1
+            end
+            ::continue::
+            if rowCount > 1 or columnCount > 1 then
+                group = group + 1
+                table.insert(att,
+                    {
+                        group = group,
+                        rowStart = rowStart,
+                        rowEnd = rowStart - 1 + rowCount,
+                        columnStart = columnStart,
+                        columnEnd = columnStart - 1 + columnCount
+                    })
+            end
+            wj = columnCount == 0 and wj + 1 or wj + columnCount
+            if wi == 1 then
+                minRowAdd = rowCount
+            else
+                minRowAdd = math.min(minRowAdd, rowCount)
+            end
+        end
+        wi = minRowAdd == 0 and wi + 1 or wi + minRowAdd
+    end
+end
+
+function abstractMonitor:refresh()
+    self:refresh_page_attach()
+    for i = 1, #self.windows, 1 do
+        for j = 1, #self.windows[i], 1 do
+            for k = 1, #self.windows[i][j], 1 do
+                if properties.winIndex[self.name][i][j] == k then
+                    self.windows[i][j][k].window.setVisible(true)
+                    self.windows[i][j][k]:refresh()
+                else
+                    self.windows[i][j][k].window.setVisible(false)
+                end
+            end
+        end
+    end
+end
+
+function abstractMonitor:onTouch(x, y)
+    local clickX, clickY
+    for i = #self.windows, 1, -1 do
+        local xPos, yPos = self.windows[i][1][1].window.getPosition()
+        if yPos <= y then
+            clickY = math.floor(y % self.windows[i][1][1].height)
+            clickY = clickY == 0 and math.floor(self.windows[i][1][1].height) or clickY
+            for j = #self.windows[i], 1, -1 do
+                xPos, yPos = self.windows[i][j][1].window.getPosition()
+                if xPos <= x then
+                    clickX = x % self.windows[i][j][1].width
+                    clickX = clickX == 0 and math.floor(self.windows[i][1][1].width) or clickX
+                    self.windows[i][j][properties.winIndex[self.name][i][j]]:onTouch(clickX, clickY)
+                    return
+                end
+            end
+        end
+    end
+end
+
 -- flightGizmoScreen
 -- 飞控系统屏幕
-local flightGizmoScreen = {
-    screenTitle = "gizmo"
-}
-flightGizmoScreen.__index = setmetatable(flightGizmoScreen, abstractScreen)
 
-function flightGizmoScreen:init()
-    if self.monitor.setTextScale then
-        self.monitor.setTextScale(0.5)
-    end
-    self.monitor.setBackgroundColor(colors.lightBlue)
-    self.mainPage = {
-        modeSelect   = { x = 1, name = " MOD ", flag = true },
-        attIndicator = { x = 6, name = " ATT ", flag = false },
-        settings     = { x = 11, name = " SET ", flag = false }
-    }
-    self.settingPage = {
-        PD_Tuning   = { y = 3, name = "PD_Tuning  ", selected = false, flag = false },
-        helicopter  = { y = 4, name = "Helicopter ", selected = false, flag = false },
-        User_Change = { y = 5, name = "User_Change", selected = false, flag = false },
-        HOME_SET    = { y = 6, name = "Home_Set   ", selected = false, flag = false },
-        Simulate    = { y = 7, name = "Simulate   ", selected = false, flag = false },
-        SET_ATT     = { y = 8, name = "Set_Att    ", selected = false, flag = false },
-    }
-    self.attPage = {
-        compass = { name = "compass", flag = true },
-        level = { name = "level", flag = false }
-    }
-    self.faceList = {
-        { name = "west",  x = 3,  y = 6 },
-        { name = "north", x = 8,  y = 4 },
-        { name = "east",  x = 13, y = 6 },
-        { name = "south", x = 8,  y = 8 }
-    }
-end
+local flightGizmoScreen = setmetatable({ screenTitle = "gizmo", }, { __index = abstractMonitor })
 
 function flightGizmoScreen:report()
-    if self.mainPage.modeSelect.flag then
-        return "Tab: MOD"
-    elseif self.mainPage.attIndicator.flag then
-        return "Tab: ATT"
-    elseif self.mainPage.settings.flag then
-        return "Tab: SET"
-    else
-        return "Tab: ?"
-    end
-end
-
-function flightGizmoScreen:refresh()
-    if coordinate and not scanner.commander then
-        for k, v in pairs(self.mainPage) do
-            if v == self.mainPage.settings then
-                scanner.scanPlayer()
-                v.flag = true
-            else
-                v.flag = false
-            end
-        end
-        for k, v in pairs(self.settingPage) do
-            if v == self.settingPage.User_Change then
-                v.flag = true
-            else
-                v.flag = false
-            end
-        end
-    end
-    self.monitor.clear()
-
-    for key, value in pairs(self.mainPage) do
-        self.monitor.setCursorPos(value.x, 1)
-        if value.flag then
-            self.monitor.blit(value.name, "fffff", "44444")
-        else
-            self.monitor.blit(value.name, "00000", "22222")
-        end
-    end
-
-    if self.mainPage.modeSelect.flag then --modePage
-        if ship.isStatic() then
-            self.monitor.setCursorPos(4, 2)
-            self.monitor.blit("[STATIC!]", "eeeeeeeee", "111111111")
-        end
-        for key, mode in pairs(modelist) do
-            self.monitor.setCursorPos(2, mode.y)
-            if mode.flag then
-                self.monitor.blit(mode.name, "ffffffffff", "4444444444")
-            else
-                self.monitor.blit(mode.name, "0000000000", "3333333333")
-            end
-        end
-
-        if properties.mode == modelist[1].name then
-            self.monitor.setCursorPos(12, modelist[1].y)
-            if modelist[1].lock then
-                self.monitor.blit(" L", "ff", "33")
-            else
-                self.monitor.blit(" N", "88", "33")
-            end
-        end
-
-        if properties.mode == modelist[2].name then
-            self.monitor.setCursorPos(12, modelist[2].y)
-            if modelist[2].lock then
-                self.monitor.blit(" A", "ff", "33")
-            else
-                self.monitor.blit(" N", "88", "33")
-            end
-        end
-
-        if properties.mode == modelist[3].name then
-            self.monitor.setCursorPos(12, modelist[3].y)
-            if modelist[3].lock then
-                self.monitor.blit(" L", "ff", "33")
-            else
-                self.monitor.blit(" N", "88", "33")
-            end
-        end
-    elseif self.mainPage.attIndicator.flag then --attPage
-        if self.attPage.compass.flag then       --罗盘
-            self.monitor.setCursorPos(1, 2)
-            for i = 1, 15, 1 do
-                self.monitor.setCursorPos(i, 2)
-                self.monitor.blit(".", "0", "3")
-            end
-
-            local xPoint = math.floor(math.cos(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
-            local zPoint = math.floor(math.sin(math.rad(attUtil.eulerAngle.yaw)) * 8 + 0.5)
-            if attUtil.pX.x > 0 then
-                self.monitor.setCursorPos(8 + zPoint, 2)
-                self.monitor.blit("W", "0", "3")
-            else
-                self.monitor.setCursorPos(8 - zPoint, 2)
-                self.monitor.blit("E", "0", "3")
-            end
-
-            if attUtil.pX.z > 0 then
-                self.monitor.setCursorPos(8 + xPoint, 2)
-                self.monitor.blit("N", "e", "3")
-            else
-                self.monitor.setCursorPos(8 - xPoint, 2)
-                self.monitor.blit("S", "b", "3")
-            end
-        elseif self.attPage.level.flag then --水平仪
-            for i = 1, 128, 1 do
-                local yPoint = math.abs(attUtil.eulerAngle.roll) > 90 and -attUtil.pZ.y or attUtil.pZ.y
-                self.monitor.setCursorPos(8 - math.cos(math.asin(attUtil.pX.y)) * (8 - i),
-                    6 - (attUtil.pX.y * 6) - yPoint * (8 - i))
-                self.monitor.blit(" ", "0", "0")
-            end
-        end
-    elseif self.mainPage.settings.flag then --settingPage
-        if self.settingPage.PD_Tuning.flag then
-            modelist[1].lock = false
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("P: --      ++", "1ffffffffffff", "333b53333331e")
-            self.monitor.setCursorPos(8, 3)
-            self.monitor.write(string.format("%0.2f", properties.omega_P))
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("D: --      ++", "9ffffffffffff", "333b53333331e")
-            self.monitor.setCursorPos(8, 4)
-            self.monitor.write(string.format("%0.2f", properties.omega_D))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("spaceAcc-   +", "fffffffffffff", "33333333b333e")
-            self.monitor.setCursorPos(11, 6)
-            self.monitor.write(string.format("%0.1f", properties.space_Acc))
-
-            self.monitor.setCursorPos(2, 7)
-            self.monitor.blit("quad_Acc-   +", "fffffffffffff", "33333333b333e")
-            self.monitor.setCursorPos(11, 7)
-            self.monitor.write(string.format("%0.1f", properties.quad_Acc))
-
-            self.monitor.setCursorPos(2, 8)
-            self.monitor.blit("MOVE_D: -   +", "fffffffffffff", "33333333b333e")
-            self.monitor.setCursorPos(11, 8)
-            self.monitor.write(string.format("%0.1f", properties.move_D))
-        elseif self.settingPage.helicopter.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("Yaw_P--    ++", "fffffffffffff", "33333b533331e")
-            self.monitor.setCursorPos(9, 3)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_YAW_P))
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("Rot_D--    ++", "fffffffffffff", "33333b533331e")
-            self.monitor.setCursorPos(9, 4)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_ROT_D))
-
-            self.monitor.setCursorPos(2, 5)
-            self.monitor.blit("ACC:-   +", "fffffffff", "3333b333e")
-            self.monitor.setCursorPos(7, 5)
-            self.monitor.write(string.format("%0.1f", properties.helicopt_ACC))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("Acc_D--    ++", "fffffffffffff", "33333b533331e")
-            self.monitor.setCursorPos(9, 6)
-            self.monitor.write(string.format("%0.2f", properties.helicopt_ACC_D))
-
-            self.monitor.setCursorPos(2, 7)
-            self.monitor.blit("MaxAngle:-  +", "fffffffffffff", "333333333b33e")
-            self.monitor.setCursorPos(12, 7)
-            self.monitor.write(string.format("%d", properties.helicopt_MAX_ANGLE))
-        elseif self.settingPage.User_Change.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-            self.monitor.setCursorPos(2, 3)
-            self.monitor.blit("selectUser:", "fffffffffff", "33333333333")
-            for i = 1, 5, 1 do
-                if scanner.playerList[i] then
-                    local name = scanner.playerList[i].name
-                    self.monitor.setCursorPos(2, 3 + i)
-                    if name == properties.userName then
-                        for j = 1, 10, 1 do
-                            local tmpChar = name:sub(j, j)
-                            if #tmpChar ~= 0 then
-                                self.monitor.blit(tmpChar, "f", "4")
-                            end
-                        end
-                    else
-                        for j = 1, 10, 1 do
-                            local tmpChar = name:sub(j, j)
-                            if #tmpChar ~= 0 then
-                                self.monitor.blit(tmpChar, "0", "3")
-                            end
-                        end
-                    end
-                end
-            end
-        elseif self.settingPage.HOME_SET.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-        elseif self.settingPage.Simulate.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-
-            self.monitor.setCursorPos(2, 4)
-            self.monitor.blit("AirMass-    +", "fffffffffffff", "3333333b3333e")
-            self.monitor.setCursorPos(10, 4)
-            self.monitor.write(string.format("%0.1f", properties.airMass))
-
-            self.monitor.setCursorPos(2, 6)
-            self.monitor.blit("Gravity-    +", "fffffffffffff", "3333333b3333e")
-            self.monitor.setCursorPos(10, 6)
-            self.monitor.write(string.format("%0.1f", properties.quadGravity))
-
-            self.monitor.setCursorPos(2, 8)
-            self.monitor.blit("0_Point-    +", "fffffffffffff", "3333333b3333e")
-            self.monitor.setCursorPos(10, 8)
-            self.monitor.write(string.format("%0.1f", properties.ZeroPoint))
-        elseif self.settingPage.SET_ATT.flag then
-            self.monitor.setCursorPos(1, 2)
-            self.monitor.blit("<<", "24", "33")
-
-            for k, v in pairs(self.faceList) do
-                if v.name == properties.shipFace then
-                    self.monitor.setCursorPos(v.x, v.y)
-                    self.monitor.blit(string.sub(v.name, 1, 1), "f", "4")
-                else
-                    self.monitor.setCursorPos(v.x, v.y)
-                    self.monitor.blit(string.sub(v.name, 1, 1), "7", "3")
-                end
-            end
-        else
-            for key, value in pairs(self.settingPage) do
-                self.monitor.setCursorPos(2, value.y)
-                if value.selected then
-                    self.monitor.blit(value.name, "fffffffffff", "44444444444")
-                else
-                    self.monitor.blit(value.name, "00000000000", "33333333333")
-                end
-            end
-        end
-    end
-
-    --reboot and shutdown
-    self.monitor.setCursorPos(1, 10)
-    self.monitor.blit("[|]", "eee", "333")
-    self.monitor.blit("[R]", "444", "333")
-    self.monitor.setCursorPos(13, 10)
-    self.monitor.blit("[X]", "fff", "333")
-end
-
-function flightGizmoScreen:onTouch(x, y)
-    if y < 2 then
-        for key, value in pairs(self.mainPage) do
-            if x >= value.x and x <= value.x + 4 then
-                value.flag = true
-            else
-                value.flag = false
-            end
-        end
-    end
-
-    if self.mainPage.modeSelect.flag then
-        if x < 12 then
-            if y >= 3 and y <= 8 then
-                for key, value in pairs(modelist) do
-                    if value.y == y then
-                        value.flag = true
-                        properties.mode = value.name
-                        if value.name == modelist[1].name or value.name == modelist[3].name then
-                            attUtil.setLastPos()
-                        end
-                    else
-                        value.flag = false
-                    end
-                end
-            end
-        else
-            if y == modelist[1].y then
-                attUtil.setLastPos()
-                modelist[1].lock = not modelist[1].lock
-            elseif y == modelist[3].y then
-                attUtil.setLastPos()
-                modelist[3].lock = not modelist[3].lock
-            elseif y == modelist[2].y then
-                modelist[2].lock = not modelist[2].lock
-            end
-        end
-    elseif self.mainPage.settings.flag then
-        if self.settingPage.PD_Tuning.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.PD_Tuning.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 3 then
-                if x == 5 then
-                    properties.omega_P = properties.omega_P - 0.1
-                elseif x == 6 then
-                    properties.omega_P = properties.omega_P - 0.01
-                elseif x == 13 then
-                    properties.omega_P = properties.omega_P + 0.01
-                elseif x == 14 then
-                    properties.omega_P = properties.omega_P + 0.1
-                end
-            elseif y == 4 then
-                if x == 5 then
-                    properties.omega_D = properties.omega_D - 0.1
-                elseif x == 6 then
-                    properties.omega_D = properties.omega_D - 0.01
-                elseif x == 13 then
-                    properties.omega_D = properties.omega_D + 0.01
-                elseif x == 14 then
-                    properties.omega_D = properties.omega_D + 0.1
-                end
-
-                if properties.omega_D >= 1.52 then properties.omega_D = 1.52 end
-            elseif y == 6 then
-                if x == 10 then
-                    properties.space_Acc = properties.space_Acc - 0.1
-                elseif x == 14 then
-                    properties.space_Acc = properties.space_Acc + 0.1
-                end
-            elseif y == 7 then
-                if x == 10 then
-                    properties.quad_Acc = properties.quad_Acc - 0.1
-                elseif x == 14 then
-                    properties.quad_Acc = properties.quad_Acc + 0.1
-                end
-            elseif y == 8 then
-                if x == 10 then
-                    properties.move_D = properties.move_D - 0.1
-                elseif x == 14 then
-                    if properties.move_D < 1.6 then
-                        properties.move_D = properties.move_D + 0.1
-                    end
-                end
-            end
-        elseif self.settingPage.helicopter.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.helicopter.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 3 then
-                if x == 7 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.1
-                elseif x == 8 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P - 0.01
-                elseif x == 13 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.01
-                elseif x == 14 then
-                    properties.helicopt_YAW_P = properties.helicopt_YAW_P + 0.1
-                end
-            elseif y == 4 then
-                if x == 7 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.1
-                elseif x == 8 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D - 0.01
-                elseif x == 13 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.01
-                elseif x == 14 then
-                    properties.helicopt_ROT_D = properties.helicopt_ROT_D + 0.1
-                end
-            elseif y == 5 then
-                if x == 6 then
-                    properties.helicopt_ACC = properties.helicopt_ACC - 0.1
-                elseif x == 10 then
-                    properties.helicopt_ACC = properties.helicopt_ACC + 0.1
-                end
-            elseif y == 6 then
-                if x == 7 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.1
-                elseif x == 8 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D - 0.01
-                elseif x == 13 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.01
-                elseif x == 14 then
-                    properties.helicopt_ACC_D = properties.helicopt_ACC_D + 0.1
-                end
-            elseif y == 7 then
-                if x == 11 then
-                    properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE - 1
-                elseif x == 14 then
-                    if properties.helicopt_MAX_ANGLE < 60 then
-                        properties.helicopt_MAX_ANGLE = properties.helicopt_MAX_ANGLE + 1
-                    end
-                end
-            end
-        elseif self.settingPage.User_Change.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.User_Change.flag = false
-                system.updatePersistentData()
-            end
-
-            if y >= 4 and y <= 8 then
-                local user = scanner.playerList[y - 3]
-                if user then
-                    properties.userName = user.name
-                end
-            end
-        elseif self.settingPage.HOME_SET.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.HOME_SET.flag = false
-                system.updatePersistentData()
-            end
-        elseif self.settingPage.Simulate.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.Simulate.flag = false
-                system.updatePersistentData()
-            end
-
-            if y == 4 then
-                if x == 9 then
-                    properties.airMass = properties.airMass - 0.1
-                elseif x == 14 then
-                    properties.airMass = properties.airMass + 0.1
-                end
-            elseif y == 6 then
-                if x == 9 then
-                    properties.quadGravity = properties.quadGravity - 0.1
-                elseif x == 14 then
-                    properties.quadGravity = properties.quadGravity + 0.1
-                end
-            elseif y == 8 then
-                if x == 9 then
-                    if properties.ZeroPoint > -1 then
-                        properties.ZeroPoint = properties.ZeroPoint - 0.1
-                    end
-                elseif x == 14 then
-                    if properties.ZeroPoint < 0 then
-                        properties.ZeroPoint = properties.ZeroPoint + 0.1
-                    end
-                end
-            end
-        elseif self.settingPage.SET_ATT.flag then
-            if y == 2 and x < 3 then
-                self.settingPage.SET_ATT.flag = false
-                system.updatePersistentData()
-            end
-
-            for k, v in pairs(self.faceList) do
-                if x == v.x and y == v.y then
-                    properties.shipFace = v.name
-                end
-            end
-        else
-            for key, value in pairs(self.settingPage) do
-                if y == value.y then
-                    if value.selected then
-                        value.flag = true
-                        if value == self.settingPage.User_Change then
-                            scanner.scanPlayer()
-                        end
-                    else
-                        value.selected = true
-                    end
-                else
-                    value.selected = false
-                    value.flag = false
-                end
-            end
-        end
-    end
-
-    if y == 10 then
-        if x <= 3 then
-            system.updatePersistentData()
-            monitorUtil.blankAllScreens()
-            os.shutdown()
-        elseif x <= 6 then
-            system.updatePersistentData()
-            monitorUtil.blankAllScreens()
-            os.reboot()
-        elseif x >= 13 then
-            monitorUtil.disconnect(self.name)
-        end
-    end
+    return "Tab: ?"
 end
 
 -- screensManagerScreen
@@ -1628,7 +2318,7 @@ function screensManagerScreen:refresh()
         end
     end)
     self.monitor.setTextColor(colors.white)
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
     self.monitor.write("Monitors:")
@@ -1667,7 +2357,7 @@ function screensManagerScreen:refresh()
         if report then
             self.monitor.write("[" .. report .. "]")
         end
-        self.monitor.setBackgroundColor(colors.lightBlue)
+        self.monitor.setBackgroundColor(colors.black)
     end
     self.rows = newrows
 end
@@ -1687,10 +2377,7 @@ end
 
 -- screenPickerScreen
 -- 用于打开其他的屏幕的屏幕
-local screenPickerScreen = {
-    screenTitle = "idle"
-}
-screenPickerScreen.__index = setmetatable(screenPickerScreen, abstractScreen)
+local screenPickerScreen = setmetatable({ screenTitle = "idle" }, { __index = abstractScreen })
 
 function screenPickerScreen:init()
     self.rows = {}
@@ -1706,7 +2393,7 @@ end
 
 function screenPickerScreen:refresh()
     self.monitor.setTextColor(colors.white)
-    self.monitor.setBackgroundColor(colors.lightBlue)
+    self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
     self.monitor.write("Choose screen:")
@@ -1723,7 +2410,7 @@ function screenPickerScreen:refresh()
                 self.monitor.setBackgroundColor(colors.gray)
             end
             self.monitor.write(row.name)
-            self.monitor.setBackgroundColor(colors.lightBlue)
+            self.monitor.setBackgroundColor(colors.black)
         end
     end
 end
@@ -1741,7 +2428,6 @@ local loadingScreen = {
     screenTitle = "loading"
 }
 loadingScreen.__index = setmetatable(loadingScreen, abstractScreen)
-
 
 function loadingScreen:report()
     return "Loading: " .. ("%i"):format(math.floor(self.step * 100 / 16)) .. "%", colors.orange
@@ -1794,14 +2480,11 @@ monitorUtil = {
 }
 
 monitorUtil.newScreen = function(name, class)
-    local screen = {}
-    monitorUtil.screens[name] = screen
     if not class then
         class = loadingScreen
     end
-    setmetatable(screen, class)
-    screen.__index = class
-    screen.name = name
+    local screen = setmetatable({ name = name }, { __index = class })
+    monitorUtil.screens[name] = screen
     local monitor
     if name == "computer" then
         monitor = term.current()
@@ -1838,7 +2521,7 @@ end
 monitorUtil.hasMonitor = function(name)
     if name == "computer" then
         return term.current().isColor()
-    elseif peripheral.isPresent(name) and peripheral.hasType(name, "monitor") and peripheral.call(name, "isColor") then
+    elseif peripheral.isPresent(name) and peripheral.hasType(name, "monitor") then
         return true
     else
         return false
@@ -1915,6 +2598,7 @@ function monitorUtil.getMonitorSort(name)
 end
 
 ---------main---------
+
 system.init()
 
 if term.isColor() then
@@ -1924,25 +2608,52 @@ end
 function flightUpdate()
     if ship.isStatic() then
         --static
-    elseif properties.mode == modelist[1].name then
+    elseif properties.mode == 1 then
         pdControl.spaceShip()
-    elseif properties.mode == modelist[2].name then
+    elseif properties.mode == 2 then
         pdControl.quadFPV()
-    elseif properties.mode == modelist[3].name then
+    elseif properties.mode == 3 then
         pdControl.helicopter()
-    elseif properties.mode == modelist[4].name then
+    elseif properties.mode == 4 then
         pdControl.followMouse()
-    elseif properties.mode == modelist[5].name then
+    elseif properties.mode == 5 then
         pdControl.follow(scanner.commander)
-    elseif properties.mode == modelist[6].name then
+    elseif properties.mode == 6 then
+        pdControl.goHome()
+    elseif properties.mode == 7 then
         pdControl.pointLoop()
     end
+end
+
+local phys_Count = 1
+local testRun = function(phys)
+    attUtil.poseVel = phys.getPoseVel()
+    attUtil.inertia = phys.getInertia()
+    attUtil.getAttWithPhysTick()
+    joyUtil.getJoyInput()
+
+    if phys_Count == 3 then
+        scanner.scan()
+        phys_Count = 1
+    else
+        phys_Count = phys_Count + 1
+    end
+
+    flightUpdate()
+    attUtil.setPreAtt()
 end
 
 function listener()
     while true do
         local eventData = { os.pullEvent() }
         local event = eventData[1]
+
+        if event == "physics_tick" then
+            if physics_flag then
+                physics_flag = false
+            end
+            testRun(eventData[2])
+        end
 
         if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
             monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
@@ -1956,14 +2667,39 @@ function listener()
 end
 
 function run()
+    parallel.waitForAll(runFlight, listener)
+end
+
+function runFlight()
+    sleep(0.1)
+    if physics_flag then
+        pdControl.basicYSpeed = 30
+        pdControl.helicopt_P_multiply = 1.5
+        pdControl.helicopt_D_multiply = 4
+        pdControl.rot_P_multiply = 1.5
+        pdControl.rot_D_multiply = 0.5
+        pdControl.move_P_multiply = 2
+        pdControl.move_D_multiply = 100
+        pdControl.airMass_multiply = 20
+    else
+        return
+    end
+
     while true do
-        attUtil.getAtt()
-        joyUtil.getJoyInput()
         scanner.scan()
-        monitorUtil.refresh()
+        attUtil.getAttWithCCTick()
+        joyUtil.getJoyInput()
         flightUpdate()
         attUtil.setPreAtt()
         sleep(0.05)
+    end
+end
+
+function refreshDisplay()
+    sleep(0.1)
+    while true do
+        monitorUtil.refresh()
+        sleep(0.1)
     end
 end
 
@@ -1973,7 +2709,7 @@ xpcall(function()
         monitorUtil.disconnectComputer()
     end
     attUtil.init()
-    parallel.waitForAll(run, listener)
+    parallel.waitForAll(run, refreshDisplay)
     error("Unexpected flight control exit")
 end, function(err)
     monitorUtil.onRootFatal()
