@@ -859,11 +859,10 @@ pdControl.quadUp = function(yVal, p, d, hov)
     d = d * pdControl.move_D_multiply
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.profile[properties.profileIndex].zeroPoint))) * p +
-            pdControl.basicYSpeed * 2 +
-            -omegaApplyRot.y * d
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p +
+            pdControl.basicYSpeed * 2 + -omegaApplyRot.y * d
     else
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.profile[properties.profileIndex].zeroPoint))) * p
+        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p
     end
 
     ship.applyRotDependentForce(0, pdControl.ySpeed * attUtil.mass, 0)
