@@ -53,6 +53,9 @@ system.init = function()
                 properties.profile.joyStick[k] = v
             end
         end
+
+        if not type(properties.mode) == "number" then properties.mode = 1 end
+
         if properties.profile.keyboard.spaceShip_D > 3.52 then properties.profile.keyboard.spaceShip_D = 3.52 end
         if properties.profile.keyboard.quad_D > 3.52 then properties.profile.keyboard.quad_D = 3.52 end
         if properties.profile.joyStick.spaceShip_D > 3.52 then properties.profile.joyStick.spaceShip_D = 3.52 end
@@ -1064,14 +1067,14 @@ pdControl.airShip = function()
         pdControl.gotoPosition(attUtil.tmpFlags.lastEuler, attUtil.tmpFlags.lastPos)
     else
         local yaw = attUtil.eulerAngle.yaw + math.asin(joyUtil.LeftStick.x) * 9 * profile.airShip_ROT_P
-        pdControl.rotate2Euler({roll = 0, yaw = yaw, pitch = 0}, 0.05, profile.airShip_ROT_D)
+        pdControl.rotate2Euler({ roll = 0, yaw = yaw, pitch = 0 }, 0.05, profile.airShip_ROT_D)
         pdControl.moveWithRot(
-        math.asin(joyUtil.BTStick.y ) * 9 * profile.airShip_MOVE_P,
-        math.asin(joyUtil.LeftStick.y ) * 9 * profile.airShip_MOVE_P,
-        math.asin(joyUtil.BTStick.x ) * 9 * profile.airShip_MOVE_P,
-        profile.airShip_MOVE_P,
-        1
-    )
+            math.asin(joyUtil.BTStick.y) * 9 * profile.airShip_MOVE_P,
+            math.asin(joyUtil.LeftStick.y) * 9 * profile.airShip_MOVE_P,
+            math.asin(joyUtil.BTStick.x) * 9 * profile.airShip_MOVE_P,
+            profile.airShip_MOVE_P,
+            1
+        )
     end
 end
 
