@@ -1,4 +1,4 @@
-if not ship then
+--[[ if not ship then
     if term.isColor() then term.setTextColor(colors.red) end
     print("ShipAPI unavailable. Either this computer is not on a ship, or CC-VS is not installed.")
     return
@@ -8,8 +8,8 @@ if not ship.setStatic then
     print(
         "ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
     return
-end
-
+end ]]
+peripheral.find("modem", rednet.open)
 ---------inner---------
 local modelist = {
     { name = "spaceShip",  flag = false },
@@ -19,12 +19,30 @@ local modelist = {
     { name = "hms_fly",    flag = false },
     { name = "follow",     flag = false },
     { name = "goHome",     flag = false },
-    { name = "pointLoop ", flag = false }
+    { name = "pointLoop ", flag = false },
+    { name = "ShipCamera", flag = false },
+    { name = "ShipFollow", flag = false },
+    { name = "Anchorage",  flag = false },
 }
 
-local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil
-local physics_flag, shutdown_flag = true, false
+local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil, shipNet_p2p_send
+local physics_flag, shutdown_flag, engineOff = true, false, false
 
+local public_protocol = "shipNet_broadcast"
+local shipName, computerId = ship.getName(), os.getComputerID()
+local childShips, callList = {}, {}
+local shipNet_list = {} --shipNet_list={id=%d, name=%s, beat=%d, pos={x,y,z}, size={x,y,z}}
+local beat_ct, call_ct, captcha, calling
+local DEFAULT_PARENT_SHIP = {
+    id = -1,
+    name = "",
+    pos = { x = 0, y = 0, z = 0 },
+    quat = { w = 0, x = 0, y = 0, z = 0 },
+    velocity = { x = 0, y = 0, z = 0 },
+    size = ship.getSize(),
+    beat = beat_ct
+}
+local parentShip = DEFAULT_PARENT_SHIP
 ---------system---------
 system = {
     fileName = "dat",
@@ -83,6 +101,7 @@ system.reset = function()
         enabledMonitors = enabledMonitors,
         winIndex = {},
         profileIndex = "joyStick",
+        raderRange = 1,
         profile = {
             keyboard = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
@@ -94,7 +113,6 @@ system.reset = function()
                 quad_P = 1,
                 quad_D = 3.52,
                 quad_Acc = 1, --四轴FPV模式油门强度
-                lock = false,
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
                 helicopt_ROT_D = 0.75,
@@ -115,7 +133,6 @@ system.reset = function()
                 quad_P = 1,
                 quad_D = 3.52,
                 quad_Acc = 1, --四轴FPV模式油门强度
-                lock = false,
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
                 helicopt_ROT_D = 0.75,
@@ -127,6 +144,7 @@ system.reset = function()
                 airShip_MOVE_P = 1,
             }
         },
+        lock = false,
         zeroPoint = 0,
         gravity = -1,
         airMass = 1, --空气密度 (风阻)
@@ -137,11 +155,11 @@ system.reset = function()
         title = "3",
         select = "3",
         other = "7",
-        MAX_MOVE_SPEED = 99,                    --自动驾驶 (点循环、跟随模式) 最大跟随速度
+        MAX_MOVE_SPEED = 299,                   --自动驾驶 (点循环、跟随模式) 最大跟随速度
         pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         pointList = {                           --点循环模式，按照顺序逐个前往
-            { x = -4499, y = 74, z = -896, yaw = 0, flip = false }
+
         }
     }
 end
@@ -263,6 +281,22 @@ function resetAngelRange(angle)
     end
 end
 
+local genCaptcha = function(len)
+    local length = len and len or 5
+    local result = ""
+    for i = 1, length, 1 do
+        local num = math.random(0, 2)
+        if num == 0 then
+            result = result .. string.char(math.random(65, 90))
+        elseif num == 1 then
+            result = result .. string.char(math.random(97, 122))
+        else
+            result = result .. string.char(math.random(48, 57))
+        end
+    end
+    return result
+end
+
 function RotateVectorByQuat(quat, v)
     local x = quat.x * 2
     local y = quat.y * 2
@@ -301,6 +335,11 @@ function quat2Euler(quat)
     return ag
 end
 
+function quaternionInv(q)
+    local a = 1.0 / (q.x * q.x + q.y * q.y + q.z * q.z + q.w * q.w);
+    return { w = a * q.w, x = a * -q.x, y = a * -q.y, z = a * -q.z }
+end
+
 function getEulerByMatrix(matrix)
     return {
         yaw = math.deg(math.atan2(matrix[1][3], matrix[3][3])),
@@ -318,12 +357,12 @@ function getEulerByMatrixLeft(matrix)
 end
 
 function euler2Quat(roll, yaw, pitch)
-    local cy = math.cos(math.rad(yaw) * 0.5)
-    local sy = math.sin(math.rad(yaw) * 0.5)
-    local cp = math.cos(math.rad(pitch) * 0.5)
-    local sp = math.sin(math.rad(pitch) * 0.5)
-    local cr = math.cos(math.rad(roll) * 0.5)
-    local sr = math.sin(math.rad(roll) * 0.5)
+    local cy = math.cos(-pitch)
+    local sy = math.sin(-pitch)
+    local cp = math.cos(-yaw)
+    local sp = math.sin(-yaw)
+    local cr = math.cos(-roll)
+    local sr = math.sin(-roll)
     local q = {
         w = cy * cp * cr + sy * sp * sr,
         x = cy * cp * sr - sy * sp * cr,
@@ -331,6 +370,25 @@ function euler2Quat(roll, yaw, pitch)
         z = sy * cp * cr - cy * sp * sr
     }
     return q
+end
+
+function quatLookAt(v)
+    local CosY = v.z / math.sqrt(v.x * v.x + v.z * v.z)
+    local CosYDiv2 = math.sqrt((1 - CosY) / 2)
+    if (v.x < 0) then CosYDiv2 = -CosYDiv2 end
+    local SinYDiv2 = math.sqrt((CosY + 1) / 2)
+
+    local CosX = math.sqrt((v.x * v.x + v.z * v.z) / (v.x * v.x + v.y * v.y + v.z * v.z))
+    local CosXDiv2 = math.sqrt((CosX + 1) / 2)
+    if (v.y > 0) then CosXDiv2 = -CosXDiv2 end
+    local SinXDiv2 = math.sqrt((1 - CosX) / 2)
+
+    return {
+        w = CosXDiv2 * CosYDiv2,
+        x = SinXDiv2 * CosYDiv2,
+        y = CosXDiv2 * SinYDiv2,
+        z = -SinXDiv2 * SinYDiv2
+    }
 end
 
 function quat2Axis(q)
@@ -620,6 +678,9 @@ attUtil.getAttWithCCTick = function()
     attUtil.conjQuat = getConjQuat(ship.getQuaternion())
     attUtil.matrix = ship.getRotationMatrix()
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
+    local tmpYawrad = math.rad(attUtil.eulerAngle.yaw)
+    attUtil.yawMatrix = { { -math.sin(tmpYawrad), -math.cos(tmpYawrad) },
+        { -math.cos(tmpYawrad), math.sin(tmpYawrad) } }
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
@@ -628,8 +689,7 @@ attUtil.getAttWithCCTick = function()
     attUtil.velocity.y = ship.getVelocity().y / 20
     attUtil.velocity.z = ship.getVelocity().z / 20
     attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
-    --commands.execAsync(("say roll=%0.2f  yaw=%0.2f  pitch=%0.2f"):format(attUtil.eulerAngle.roll, attUtil.eulerAngle.yaw, attUtil.eulerAngle.pitch))
-    --commands.execAsync(("say w = %0.2f x=%0.2f  y=%0.2f  z=%0.2f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
+    --commands.execAsync(("say w=%0.6f, x=%0.6f, y=%0.6f, z=%0.6f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
 end
 
 attUtil.getAttWithPhysTick = function()
@@ -642,6 +702,9 @@ attUtil.getAttWithPhysTick = function()
     attUtil.conjQuat = getConjQuat(attUtil.poseVel.rot)
     attUtil.matrix = ship.getRotationMatrix()
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
+    local tmpYawrad = math.rad(attUtil.eulerAngle.yaw)
+    attUtil.yawMatrix = { { -math.sin(tmpYawrad), -math.cos(tmpYawrad) },
+        { -math.cos(tmpYawrad), math.sin(tmpYawrad) } }
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
@@ -683,16 +746,18 @@ attUtil.init = function()
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
     attUtil.preEuler = { roll = 0, yaw = 0, pitch = 0 }
     attUtil.tmpFlags = {
-        lastPos = attUtil.position,
-        lastEuler = attUtil.eulerAngle,
-        hmsLastAtt = attUtil.eulerAngle,
-        followLastAtt = attUtil.position
+        lastPos = ship.getWorldspacePosition(),
+        lastEuler = quat2Euler(attUtil.quat),
+        hmsLastAtt = quat2Euler(attUtil.quat),
+        followLastAtt = ship.getWorldspacePosition(),
+        quat = quatMultiply(attUtil.quatList[properties.shipFace], ship.getQuaternion())
     }
 end
 
 attUtil.setLastPos = function()
     attUtil.tmpFlags.lastPos = attUtil.position
     attUtil.tmpFlags.lastEuler = attUtil.eulerAngle
+    attUtil.tmpFlags.quat = attUtil.quat
 end
 
 ---------joyUtil---------
@@ -851,10 +916,11 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
             0,
             zVal * sidemove_p * attUtil.mass)
+    else
+        ship.applyRotDependentForce(xVal * p * attUtil.mass,
+            0,
+            zVal * p * attUtil.mass)
     end
-    ship.applyRotDependentForce(xVal * p * attUtil.mass,
-        0,
-        zVal * p * attUtil.mass)
 end
 
 pdControl.quadUp = function(yVal, p, d, hov)
@@ -885,6 +951,9 @@ end
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     p                    = p * pdControl.rot_P_multiply
     d                    = d * pdControl.rot_D_multiply
+    xRot                 = resetAngelRange(xRot)
+    yRot                 = resetAngelRange(yRot)
+    zRot                 = resetAngelRange(zRot)
     pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
     pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
     pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
@@ -911,29 +980,48 @@ end
 pdControl.rotate2Euler2 = function(euler, p, d)
     local x_c = math.cos(math.rad(euler.pitch))
     local tmpx = {
-        x = -math.cos(math.rad(euler.yaw)) * x_c,
-        y = -math.sin(math.rad(euler.pitch)),
-        z = math.sin(math.rad(euler.yaw)) * x_c
+        x = math.cos(math.rad(euler.yaw)) * x_c,
+        y = math.sin(math.rad(euler.pitch)),
+        z = -math.sin(math.rad(euler.yaw)) * x_c
     }
-    euler.yaw = -euler.yaw
     local z_c = math.cos(math.rad(euler.roll))
     local tmpz = {
         x = math.sin(math.rad(euler.yaw)) * z_c,
-        y = -math.sin(math.rad(euler.roll)),
+        y = math.sin(math.rad(euler.roll)),
         z = -math.cos(math.rad(euler.yaw)) * z_c
     }
 
-    tmpx = RotateVectorByQuat(attUtil.conjQuat, tmpx)
-    tmpz = RotateVectorByQuat(attUtil.conjQuat, tmpz)
-    local xRot = math.deg(math.asin(tmpz.y))
-    local yRot = math.deg(math.atan2(tmpx.z, -tmpx.x))
-    local zRot = -math.deg(math.asin(tmpx.y))
+    local troll = math.atan2(attUtil.pZ.y, copysign(math.sqrt(attUtil.pZ.x ^ 2 + attUtil.pZ.z ^ 2), attUtil.pY.y))
+    local tyaw = math.atan2(attUtil.pX.x, attUtil.pX.z)
+    local tpitch = math.atan2(attUtil.pX.y, copysign(math.sqrt(attUtil.pX.x ^ 2 + attUtil.pX.z ^ 2), attUtil.pY.y))
+    if attUtil.pY.y < 0 then --超过180°优先旋转最快的 避免多轴重复旋转
+        tyaw = 0
+        if math.abs(troll) > math.abs(tpitch) then
+            troll = 0
+        else
+            tpitch = 0
+        end
+    end
+    local xRot = math.deg(math.asin(tmpz.y) - troll)
+    local yRot = resetAngelRange(math.deg(math.atan2(tmpx.x, tmpx.z) - tyaw))
+    local zRot = math.deg(math.asin(tmpx.y) - tpitch)
 
     pdControl.rotInner(xRot, yRot, zRot, p, d)
 end
 
+pdControl.rotate2quat = function(q, p, d)
+    local tgQ = quatMultiply(q, attUtil.quat)
+    local xPoint, zPoint
+    xPoint = RotateVectorByQuat(tgQ, { x = -1, y = 0, z = 0 })
+    zPoint = RotateVectorByQuat(tgQ, { x = 0, y = 0, z = -1 })
+    local xRot = math.deg(-math.asin(zPoint.y))
+    local yRot = math.deg(-math.asin(xPoint.z))
+    local zRot = math.deg(math.asin(xPoint.y))
+    pdControl.rotInner(xRot, yRot, zRot, p, d)
+end
+
 pdControl.spaceShip = function()
-    if properties.profile[properties.profileIndex].lock then
+    if properties.lock then
         if next(attUtil.tmpFlags.lastEuler) == nil then attUtil.setLastPos() end
         if next(attUtil.tmpFlags.lastPos) == nil then attUtil.setLastPos() end
         pdControl.gotoPosition(attUtil.tmpFlags.lastEuler, attUtil.tmpFlags.lastPos)
@@ -960,7 +1048,7 @@ pdControl.spaceShip = function()
 end
 
 pdControl.quadFPV = function()
-    if properties.profile[properties.profileIndex].lock then
+    if properties.lock then
         if joyUtil.LeftStick.y == 0 then
             pdControl.quadUp(
                 0,
@@ -992,16 +1080,15 @@ pdControl.quadFPV = function()
             }
             euler.roll = math.abs(euler.roll) > 70 and copysign(70, euler.roll) or euler.roll
             euler.pitch = math.abs(euler.pitch) > 70 and copysign(70, euler.pitch) or euler.pitch
-            pdControl.rotate2Euler(euler, properties.profile[properties.profileIndex].quad_P,
-                properties.profile[properties.profileIndex].quad_D)
+            pdControl.rotate2Euler2(euler, 1, 2.6)
         else
-            pdControl.rotate2Euler({
+            pdControl.rotate2Euler2({
                     roll = math.deg(math.asin(joyUtil.RightStick.x)) / 1.5,
-                    yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 40 / pdControl.rot_D_multiply,
+                    yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 20 / pdControl.rot_D_multiply,
                     pitch = math.deg(math.asin(joyUtil.RightStick.y) / 1.5)
                 },
                 properties.profile[properties.profileIndex].quad_P,
-                properties.profile[properties.profileIndex].quad_D)
+                2.6)
         end
     else
         pdControl.quadUp(
@@ -1021,7 +1108,7 @@ end
 pdControl.helicopter = function()
     local acc
     local tgAg = {}
-    if properties.profile[properties.profileIndex].lock then
+    if properties.lock then
         local tmpPos = {}
         tmpPos.y = attUtil.tmpFlags.lastPos.y - (attUtil.position.y + attUtil.velocity.y * 20)
         acc = tmpPos.y * 10
@@ -1053,7 +1140,7 @@ pdControl.helicopter = function()
         properties.profile[properties.profileIndex].helicopt_ACC_D,
         true)
 
-    pdControl.rotate2Euler(
+    pdControl.rotate2Euler2(
         tgAg,
         0.5 * properties.profile[properties.profileIndex].helicopt_ROT_P * pdControl.helicopt_P_multiply,
         properties.profile[properties.profileIndex].helicopt_ROT_D / pdControl.rot_D_multiply
@@ -1063,11 +1150,11 @@ end
 pdControl.airShip = function()
     local profile = properties.profile[properties.profileIndex]
 
-    if properties.profile[properties.profileIndex].lock then
+    if properties.lock then
         pdControl.gotoPosition(attUtil.tmpFlags.lastEuler, attUtil.tmpFlags.lastPos)
     else
         local yaw = attUtil.eulerAngle.yaw + math.asin(joyUtil.LeftStick.x) * 9 * profile.airShip_ROT_P
-        pdControl.rotate2Euler({ roll = 0, yaw = yaw, pitch = 0 }, 0.05, profile.airShip_ROT_D)
+        pdControl.rotate2Euler2({ roll = 0, yaw = yaw, pitch = 0 }, 0.05, profile.airShip_ROT_D)
         pdControl.moveWithRot(
             math.asin(joyUtil.BTStick.y) * 9 * profile.airShip_MOVE_P,
             math.asin(joyUtil.LeftStick.y) * 9 * profile.airShip_MOVE_P,
@@ -1083,20 +1170,24 @@ pdControl.gotoPosition = function(euler, pos)
     xVal = (pos.x - attUtil.position.x) * 3.6
     yVal = (pos.y - attUtil.position.y) * 3.6
     zVal = (pos.z - attUtil.position.z) * 3.6
-    xVal = math.abs(xVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, xVal) or xVal
-    yVal = math.abs(yVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, yVal) or yVal
-    zVal = math.abs(zVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, zVal) or zVal
-
+    if properties.mode ~= 9 then
+        xVal = math.abs(xVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, xVal) or xVal
+        yVal = math.abs(yVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, yVal) or yVal
+        zVal = math.abs(zVal) > properties.MAX_MOVE_SPEED and copysign(properties.MAX_MOVE_SPEED, zVal) or zVal
+    end
     pdControl.moveWithOutRot(
         xVal,
         yVal,
         zVal,
-        2,
-        1.6
+        8,
+        4.5
     )
+
     if euler then
-        pdControl.rotate2Euler(euler, properties.profile[properties.profileIndex].spaceShip_P,
-            properties.profile[properties.profileIndex].spaceShip_D)
+        euler.roll  = resetAngelRange(euler.roll)
+        euler.yaw   = resetAngelRange(euler.yaw)
+        euler.pitch = resetAngelRange(euler.pitch)
+        pdControl.rotate2Euler2(euler, 0.9, 2.8)
     end
 end
 
@@ -1184,6 +1275,31 @@ pdControl.pointLoop = function()
     pdControl.gotoPosition(
         tgAg, pos)
 end
+
+local cameraQuat = { w = -1, x = 0, y = 0, z = 0 }
+local xOffset = 0
+pdControl.ShipCamera = function()
+    if parentShip.id ~= -1 then
+        xOffset = xOffset + math.asin(joyUtil.BTStick.y)
+        xOffset = xOffset < 3 and 3 or xOffset
+        xOffset = xOffset > 32 and 32 or xOffset
+        local range = { x = -parentShip.size.x - xOffset, y = 0, z = 0 }
+        local pos = parentShip.pos
+        pos.x = pos.x + parentShip.velocity.x
+        pos.y = pos.y + parentShip.velocity.y
+        pos.z = pos.z + parentShip.velocity.z
+        local myRot = euler2Quat(0, math.asin(joyUtil.LeftStick.x) / 16, math.asin(joyUtil.LeftStick.y) / 16)
+        cameraQuat = quatMultiply(cameraQuat, myRot)
+        range = RotateVectorByQuat(cameraQuat, range)
+        pos.x = pos.x + range.x
+        pos.y = pos.y + range.y
+        pos.z = pos.z + range.z
+        pdControl.rotate2quat(getConjQuat(cameraQuat), 0.9, 2.8)
+        pdControl.gotoPosition(nil, pos)
+    else
+        range = nil
+    end
+end
 ---------screens---------
 
 -- abstractScreen
@@ -1246,7 +1362,7 @@ function abstractWindow:new(parent, nX, nY, nWidth, nHeight, visible)
     self.window = window.create(parent, nX, nY, nWidth, nHeight, visible)
 end
 
-function abstractWindow:refreshButtons(cut, page) --没有参数时打印所有按钮，有参数时：cut前面的正常打印，cut后面的开始翻页
+function abstractWindow:refreshButtons(cut, page, rowCut) --没有参数时打印所有按钮，有参数时：cut前面的正常打印，cut后面的开始翻页
     if not self.buttons then
         for i = 1, #self.buttons, 1 do
             self.buttons[i].x = math.floor(self.buttons[i].x)
@@ -1266,11 +1382,11 @@ function abstractWindow:refreshButtons(cut, page) --没有参数时打印所有�
     end
 
     if page then
-        local start = (page - 1) * (self.height - 4) + 1 + cut
-        for i = start, page * (self.height - 4) + cut, 1 do
+        local start = (page - 1) * (self.height - rowCut) + 1 + cut
+        for i = start, page * (self.height - rowCut) + cut, 1 do
             if i > #self.buttons then break end
             local bt = self.buttons[i]
-            self.window.setCursorPos(bt.x, bt.y - (page - 1) * (self.height - 4))
+            self.window.setCursorPos(bt.x, bt.y - (page - 1) * (self.height - rowCut))
             self.window.blit(bt.text, bt.blitF, bt.blitB)
         end
     end
@@ -1284,10 +1400,10 @@ end
 
 function abstractWindow:switchWindow(index)
     local result = properties.winIndex[self.name][self.row][self.column] + index
-    if result > 4 then
+    if result > 5 then
         result = 1
     elseif result == 0 then
-        result = 4
+        result = 5
     end
     properties.winIndex[self.name][self.row][self.column] = result
     return result
@@ -1304,7 +1420,7 @@ function abstractWindow:nextPage(x, y)
 end
 
 function abstractWindow:subPage_Back(x, y)
-    if x == 1 and y == 1 then
+    if x <= 2 and y == 1 then
         system.updatePersistentData()
         properties.winIndex[self.name][self.row][self.column] = self.indexFlag
     end
@@ -1315,39 +1431,46 @@ function abstractWindow:refreshTitle()
     self.window.blit(self.pageName, genStr(properties.title, #self.pageName), genStr(properties.bg, #self.pageName))
 end
 
-local page_attach_manager = {}
-local modPage             = setmetatable({ pageId = 1, pageName = "modPage" }, { __index = abstractWindow })
-local autoPage            = setmetatable({ pageId = 2, pageName = "autoPage" }, { __index = abstractWindow })
-local attPage             = setmetatable({ pageId = 3, pageName = "attPage" }, { __index = abstractWindow })
-local setPage             = setmetatable({ pageId = 4, pageName = "setPage" }, { __index = abstractWindow })
-local set_spaceShip       = setmetatable({ pageId = 5, pageName = "set_spaceShip" }, { __index = abstractWindow })
-local set_quadFPV         = setmetatable({ pageId = 6, pageName = "set_quadFPV" }, { __index = abstractWindow })
-local set_helicopter      = setmetatable({ pageId = 7, pageName = "set_helicopter" }, { __index = abstractWindow })
-local set_airShip         = setmetatable({ pageId = 8, pageName = "set_airShip" }, { __index = abstractWindow })
-local set_user            = setmetatable({ pageId = 9, pageName = "user_Change" }, { __index = abstractWindow })
-local set_home            = setmetatable({ pageId = 10, pageName = "home_set" }, { __index = abstractWindow })
-local set_simulate        = setmetatable({ pageId = 11, pageName = "simulate" }, { __index = abstractWindow })
-local set_att             = setmetatable({ pageId = 12, pageName = "set_att" }, { __index = abstractWindow })
-local set_profile         = setmetatable({ pageId = 13, pageName = "profile" }, { __index = abstractWindow })
-local set_colortheme      = setmetatable({ pageId = 14, pageName = "colortheme" }, { __index = abstractWindow })
-local controllPage        = setmetatable({ pageId = 15, pageName = "controllPage" }, { __index = abstractWindow })
+local page_attach_manager  = {}
+local modPage              = setmetatable({ pageId = 1, pageName = "modPage" }, { __index = abstractWindow })
+local shipNetPage          = setmetatable({ pageId = 2, pageName = "shipNetPage" }, { __index = abstractWindow })
+local attPage              = setmetatable({ pageId = 3, pageName = "attPage" }, { __index = abstractWindow })
+local raderPage            = setmetatable({ pageId = 4, pageName = "raderPage" }, { __index = abstractWindow })
+local setPage              = setmetatable({ pageId = 5, pageName = "setPage" }, { __index = abstractWindow })
+local set_spaceShip        = setmetatable({ pageId = 6, pageName = "set_spaceShip" }, { __index = abstractWindow })
+local set_quadFPV          = setmetatable({ pageId = 7, pageName = "set_quadFPV" }, { __index = abstractWindow })
+local set_helicopter       = setmetatable({ pageId = 8, pageName = "set_helicopter" }, { __index = abstractWindow })
+local set_airShip          = setmetatable({ pageId = 9, pageName = "set_airShip" }, { __index = abstractWindow })
+local set_user             = setmetatable({ pageId = 10, pageName = "user_Change" }, { __index = abstractWindow })
+local set_home             = setmetatable({ pageId = 11, pageName = "home_set" }, { __index = abstractWindow })
+local set_simulate         = setmetatable({ pageId = 12, pageName = "simulate" }, { __index = abstractWindow })
+local set_att              = setmetatable({ pageId = 13, pageName = "set_att" }, { __index = abstractWindow })
+local set_profile          = setmetatable({ pageId = 14, pageName = "profile" }, { __index = abstractWindow })
+local set_colortheme       = setmetatable({ pageId = 15, pageName = "colortheme" }, { __index = abstractWindow })
+local shipNet_set_Page     = setmetatable({ pageId = 16, pageName = "shipNet_set" }, { __index = abstractWindow })
+local shipNet_connect_Page = setmetatable({ pageId = 17, pageName = "shipNet_call" }, { __index = abstractWindow })
+local ShipCamera           = setmetatable({ pageId = 18, pageName = "ShipCamera" }, { __index = abstractWindow })
+local ShipFollow           = setmetatable({ pageId = 19, pageName = "ShipFollow" }, { __index = abstractWindow })
+local Anchorage            = setmetatable({ pageId = 20, pageName = "Anchorage" }, { __index = abstractWindow })
 
-flightPages               = {
-    modPage,        --1
-    autoPage,       --2
-    attPage,        --3
-    setPage,        --4
-    set_spaceShip,  --5
-    set_quadFPV,    --6
-    set_helicopter, --7
-    set_airShip,    --8
-    set_user,       --9
-    set_home,       --10
-    set_simulate,   --11
-    set_att,        --12
-    set_profile,    --13
-    set_colortheme, --14
-    controllPage    --15
+flightPages                = {
+    modPage,             --1
+    attPage,             --2
+    shipNetPage,         --3
+    raderPage,           --4
+    setPage,             --5
+    set_spaceShip,       --6
+    set_quadFPV,         --7
+    set_helicopter,      --8
+    set_airShip,         --9
+    set_user,            --10
+    set_home,            --11
+    set_simulate,        --12
+    set_att,             --13
+    set_profile,         --14
+    set_colortheme,      --15
+    shipNet_set_Page,    --16
+    shipNet_connect_Page --17
 }
 
 --winIndex = 1
@@ -1355,110 +1478,47 @@ function modPage:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
     self.buttons = {
-        { text = "<    MOD    >",  x = self.width / 2 - 6, y = 1,               blitF = genStr(title, 13),               blitB = genStr(bg, 13) },
-        { text = "[|]",            x = 3,                  y = self.height - 1, blitF = "eee",                           blitB = genStr(bg, 3) },
-        { text = "[R]",            x = 6,                  y = self.height - 1, blitF = "222",                           blitB = genStr(bg, 3) },
-        { text = "[x]",            x = self.width - 5,     y = self.height - 1, blitF = "888",                           blitB = genStr(bg, 3) },
-        { text = modelist[1].name, x = 2,                  y = 3,               blitF = genStr(font, #modelist[1].name), blitB = genStr(bg, #modelist[1].name), modeId = 1, select = genStr(select, #modelist[1].name) },
-        { text = modelist[2].name, x = 2,                  y = 4,               blitF = genStr(font, #modelist[2].name), blitB = genStr(bg, #modelist[2].name), modeId = 2, select = genStr(select, #modelist[2].name) },
-        { text = modelist[3].name, x = 2,                  y = 5,               blitF = genStr(font, #modelist[3].name), blitB = genStr(bg, #modelist[3].name), modeId = 3, select = genStr(select, #modelist[3].name) },
-        { text = modelist[4].name, x = 2,                  y = 6,               blitF = genStr(font, #modelist[4].name), blitB = genStr(bg, #modelist[4].name), modeId = 4, select = genStr(select, #modelist[4].name) },
-        { text = modelist[5].name, x = 2,                  y = 7,               blitF = genStr(font, #modelist[5].name), blitB = genStr(bg, #modelist[5].name), modeId = 5, select = genStr(select, #modelist[5].name) },
-    }
-end
-
-function modPage:refresh()
-    self:refreshButtons()
-    for k, v in pairs(self.buttons) do
-        if v.text == modelist[properties.mode].name then
-            self.window.setCursorPos(v.x, v.y)
-            self.window.blit(v.text, v.blitB, v.select)
-        end
-    end
-end
-
-function modPage:onTouch(x, y)
-    self:nextPage(x, y)
-    for k, v in pairs(self.buttons) do
-        if x >= v.x and x < v.x + #v.text and y == v.y then
-            if v == self.buttons[2] or v == self.buttons[3] then
-                system.updatePersistentData()
-                if v == self.buttons[2] then
-                    shutdown_flag = true
-                    monitorUtil.onSystemSleep()
-                else
-                    os.reboot()
-                end
-            elseif v == self.buttons[4] then
-                monitorUtil.disconnect(self.name)
-            elseif v.modeId then
-                properties.mode = v.modeId
-            end
-        end
-    end
-end
-
---winIndex = 2
-function autoPage:init()
-    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
-        properties.other
-    self.buttons = {
-        { text = "<  AUTOMOD  >",  x = self.width / 2 - 6, y = 1, blitF = genStr(title, 13),               blitB = genStr(bg, 13) },
-        { text = modelist[6].name, x = 2,                  y = 3, blitF = genStr(font, #modelist[6].name), blitB = genStr(bg, #modelist[6].name), select = genStr(select, #modelist[6].name), modeId = 6 },
-        { text = modelist[7].name, x = 2,                  y = 4, blitF = genStr(font, #modelist[7].name), blitB = genStr(bg, #modelist[7].name), select = genStr(select, #modelist[7].name), modeId = 7 },
-        { text = modelist[8].name, x = 2,                  y = 5, blitF = genStr(font, #modelist[8].name), blitB = genStr(bg, #modelist[8].name), select = genStr(select, #modelist[8].name), modeId = 8 },
-    }
-end
-
-function autoPage:refresh()
-    self:refreshButtons()
-    for k, v in pairs(self.buttons) do
-        if v.text == modelist[properties.mode].name then
-            self.window.setCursorPos(v.x, v.y)
-            self.window.blit(v.text, v.blitB, v.select)
-        end
-    end
-end
-
-function autoPage:onTouch(x, y)
-    self:nextPage(x, y)
-    for k, v in pairs(self.buttons) do
-        if x >= v.x and x < v.x + #v.text and y == v.y then
-            if v.modeId then
-                properties.mode = v.modeId
-            end
-        end
-    end
-end
-
---winIndex = 4
-function setPage:init()
-    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
-        properties.other
-    self.buttons = {
-        { text = "<    SET    >", x = self.width / 2 - 6, y = 1,       blitF = genStr(title, 13), blitB = genStr(bg, 13) },
-        { text = "S_SpaceShip",   x = 2,                  pageId = 5,  y = 3,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_QuadFPV  ",   x = 2,                  pageId = 6,  y = 4,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_Helicopt ",   x = 2,                  pageId = 7,  y = 5,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_aitShip  ",   x = 2,                  pageId = 8,  y = 6,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "User_Change",   x = 2,                  pageId = 9,  y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Home_Set   ",   x = 2,                  pageId = 10, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Simulate   ",   x = 2,                  pageId = 11, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Set_Att    ",   x = 2,                  pageId = 12, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Profile    ",   x = 2,                  pageId = 13, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Colortheme ",   x = 2,                  pageId = 14, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false }
+        { text = "<    MOD    >",   x = self.width / 2 - 5, y = 1,               blitF = genStr(title, 13),                blitB = genStr(bg, 13) },
+        { text = "[|]",             x = 3,                  y = self.height - 1, blitF = "eee",                            blitB = genStr(bg, 3) },
+        { text = "[R]",             x = 6,                  y = self.height - 1, blitF = "222",                            blitB = genStr(bg, 3) },
+        { text = "[x]",             x = self.width - 5,     y = self.height - 1, blitF = "888",                            blitB = genStr(bg, 3) },
+        { text = modelist[1].name,  x = 2,                  y = 3,               blitF = genStr(font, #modelist[1].name),  blitB = genStr(bg, #modelist[1].name),  modeId = 1,  select = genStr(select, #modelist[1].name) },
+        { text = modelist[2].name,  x = 2,                  y = 4,               blitF = genStr(font, #modelist[2].name),  blitB = genStr(bg, #modelist[2].name),  modeId = 2,  select = genStr(select, #modelist[2].name) },
+        { text = modelist[3].name,  x = 2,                  y = 5,               blitF = genStr(font, #modelist[3].name),  blitB = genStr(bg, #modelist[3].name),  modeId = 3,  select = genStr(select, #modelist[3].name) },
+        { text = modelist[4].name,  x = 2,                  y = 6,               blitF = genStr(font, #modelist[4].name),  blitB = genStr(bg, #modelist[4].name),  modeId = 4,  select = genStr(select, #modelist[4].name) },
+        { text = modelist[5].name,  x = 2,                  y = 7,               blitF = genStr(font, #modelist[5].name),  blitB = genStr(bg, #modelist[5].name),  modeId = 5,  select = genStr(select, #modelist[5].name) },
+        { text = modelist[6].name,  x = 2,                  y = 8,               blitF = genStr(font, #modelist[6].name),  blitB = genStr(bg, #modelist[6].name),  modeId = 6,  select = genStr(select, #modelist[6].name) },
+        { text = modelist[7].name,  x = 2,                  y = 9,               blitF = genStr(font, #modelist[7].name),  blitB = genStr(bg, #modelist[7].name),  modeId = 7,  select = genStr(select, #modelist[7].name) },
+        { text = modelist[8].name,  x = 2,                  y = 10,              blitF = genStr(font, #modelist[8].name),  blitB = genStr(bg, #modelist[8].name),  modeId = 8,  select = genStr(select, #modelist[8].name) },
+        { text = modelist[9].name,  x = 2,                  y = 11,              blitF = genStr(font, #modelist[9].name),  blitB = genStr(bg, #modelist[9].name),  modeId = 9,  select = genStr(select, #modelist[9].name) },
+        { text = modelist[10].name, x = 2,                  y = 12,              blitF = genStr(font, #modelist[10].name), blitB = genStr(bg, #modelist[10].name), modeId = 10, select = genStr(select, #modelist[10].name) },
+        { text = modelist[11].name, x = 2,                  y = 13,              blitF = genStr(font, #modelist[11].name), blitB = genStr(bg, #modelist[11].name), modeId = 11, select = genStr(select, #modelist[11].name) },
     }
     self.otherButtons = {
-        { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+        { text = "      v      ", x = 2, y = self.height - 2, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
         { text = "      ^      ", x = 2, y = 2,               blitF = genStr(bg, 13), blitB = genStr(other, 13) },
     }
     self.pageIndex = 1
+    self.cutRow = 5 --不需要分页的区域总行高
 end
 
-function setPage:refresh()
-    self:refreshButtons(1, self.pageIndex)
-    if #self.buttons > self.height - 4 then
-        if self.pageIndex == 1 or self.pageIndex * (self.height - 4) < #self.buttons - 1 then
+function modPage:refresh()
+    self:refreshButtons(4, self.pageIndex, self.cutRow)
+    for k, v in pairs(self.buttons) do
+        if v.text == modelist[properties.mode].name then
+            local yPos = v.y - (self.pageIndex - 1) * (self.height - self.cutRow)
+            if yPos > 2 and yPos < self.height - 1 then
+                self.window.setCursorPos(v.x, v.y - (self.pageIndex - 1) * (self.height - self.cutRow))
+                self.window.blit(v.text, v.blitB, v.select)
+                if properties.lock and v.modeId < 5 then
+                    self.window.blit(" L", " " .. properties.other,
+                        genStr(properties.bg, 2))
+                end
+            end
+        end
+    end
+    if #self.buttons > self.height - self.cutRow then
+        if self.pageIndex == 1 or self.pageIndex * (self.height - self.cutRow) < #self.buttons - 4 then
             local bt = self.otherButtons[1]
             self.window.setCursorPos(bt.x, bt.y)
             self.window.blit(bt.text, bt.blitF, bt.blitB)
@@ -1469,40 +1529,65 @@ function setPage:refresh()
             self.window.blit(bt.text, bt.blitF, bt.blitB)
         end
     end
-    for k, v in pairs(self.buttons) do
-        if v.selected then
-            local yPos = v.y - (self.pageIndex - 1) * (self.height - 4)
-            if yPos > 2 and yPos < self.height - 1 then
-                self.window.setCursorPos(v.x, v.y - (self.pageIndex - 1) * (self.height - 4))
-                self.window.blit(v.text, v.blitB, v.select)
-            end
+    if not physics_flag then
+        self.window.setCursorPos(1, 2)
+        self.window.blit("*", properties.select, properties.bg)
+    end
+    if self.row == 1 and self.pageIndex == 1 then
+        self.window.setCursorPos(self.width / 2 - 5, 2)
+        if engineOff then
+            self.window.blit("engine_OFF", genStr(properties.other, 10), genStr(properties.bg, 10))
+        else
+            self.window.blit("engine_ON ", genStr(properties.other, 10), genStr(properties.bg, 10))
         end
     end
 end
 
-function setPage:onTouch(x, y)
+function modPage:onTouch(x, y)
     self:nextPage(x, y)
     if y == 2 then
-        if self.pageIndex > 1 then
+        if self.row == 1 and self.pageIndex == 1 then
+            if y == 2 and x >= self.width / 2 - 5 and x <= self.width / 2 + 5 then
+                engineOff = not engineOff
+            end
+        elseif self.pageIndex > 1 then
             self.pageIndex = self.pageIndex - 1
         end
-    elseif y < self.height - 1 and y > 2 then
+    elseif y == self.height - 1 then
+        if x >= self.buttons[2].x and x < self.buttons[3].x + 3 then
+            system.updatePersistentData()
+            if x > 5 then
+                os.reboot()
+            else
+                shutdown_flag = true
+                monitorUtil.onSystemSleep()
+            end
+        elseif x > self.buttons[4].x then
+            monitorUtil.disconnect(self.name)
+        end
+    elseif y < self.height - 2 and y > 2 then
         for k, v in pairs(self.buttons) do
             if v.y > 1 then
-                if x >= v.x and x < v.x + #v.text and y == v.y - (self.pageIndex - 1) * (self.height - 4) then
-                    if not v.selected then
-                        v.selected = true
-                    else
-                        self.windows[self.row][self.column][v.pageId].indexFlag = 4
-                        properties.winIndex[self.name][self.row][self.column] = v.pageId
+                if x >= v.x and x < v.x + #v.text + 2 and y == v.y - (self.pageIndex - 1) * (self.height - self.cutRow) then
+                    if v.modeId then
+                        if properties.mode == v.modeId then
+                            if v.modeId < 5 then
+                                attUtil.setLastPos()
+                                properties.lock = not properties.lock
+                            end
+                        else
+                            if v.modeId < 9 then
+                                properties.mode = v.modeId
+                            elseif parentShip.id ~= -1 then
+                                properties.mode = v.modeId
+                            end
+                        end
                     end
-                else
-                    v.selected = false
                 end
             end
         end
     elseif y == self.otherButtons[1].y then
-        if #self.buttons - 1 > self.pageIndex * (self.height - 4) then
+        if #self.buttons - 1 > self.pageIndex * (self.height - self.cutRow) then
             self.pageIndex = self.pageIndex + 1
         else
             self.pageIndex = 1
@@ -1510,7 +1595,7 @@ function setPage:onTouch(x, y)
     end
 end
 
---winIndex = 3
+--winIndex = 2
 function attPage:init()
 end
 
@@ -1520,12 +1605,6 @@ function attPage:refresh()
     local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
     local width, height, xPos, yPos
     if info ~= -1 then
-        --self.window.setCursorPos(self.width / 2 - 3, self.height / 2 - 3)
-        --self.window.write("group=" .. info.group)
-        --self.window.setCursorPos(self.width / 2 - 6, self.height / 2 - 1)
-        --self.window.write(("row=%d, max=%d" ):format(info.row, info.maxRow))
-        --self.window.setCursorPos(self.width / 2 - 8, self.height / 2 + 1)
-        --self.window.write(("column=%d, max=%d" ):format(info.column, info.maxColumn))
         width = info.maxColumn * self.width
         height = info.maxRow * self.height
         xPos = (info.column - 1) * self.width + 1
@@ -1594,7 +1673,7 @@ function attPage:refresh()
             end
             self.window.setCursorPos(rline, yy)
             if i == xPointy then
-                self.window.blit("-<", font .. select, genStr(bg, 2))
+                self.window.blit("-<", select .. font, genStr(bg, 2))
             else
                 self.window.blit("-", font, bg)
             end
@@ -1637,7 +1716,7 @@ function attPage:refresh()
             self.window.setCursorPos(x - 2, y + 2)
             self.window.blit("tuning >", genStr(bg, 8), genStr(select, 8))
             self.window.setCursorPos(x - 2, y + 3)
-            if properties.profile[properties.profileIndex].lock then
+            if properties.lock then
                 self.window.blit("LOCK  ON", genStr(bg, 8), genStr(other, 8))
             else
                 self.window.blit("LOCK OFF", genStr(other, 8), genStr(bg, 8))
@@ -1688,29 +1767,568 @@ function attPage:onTouch(x, y)
     if y == by and x >= bx and x <= bx + 8 then
         local index
         if mod == "spaceShip" then
-            index = 5
-        elseif mod == "quadFPV" then
             index = 6
-        elseif mod == "helicopter" then
+        elseif mod == "quadFPV" then
             index = 7
-        elseif mod == "airShip" then
+        elseif mod == "helicopter" then
             index = 8
+        elseif mod == "airShip" then
+            index = 9
         end
         if index then
-            self.windows[self.row][self.column][index].indexFlag = 3
+            self.windows[self.row][self.column][index].indexFlag = 2
             properties.winIndex[self.name][self.row][self.column] = index
         end
     elseif y == by + 1 and x >= bx and x <= bx + 8 then
         attUtil.setLastPos()
-        properties.profile[properties.profileIndex].lock = not properties.profile[properties.profileIndex].lock
+        properties.lock = not properties.lock
+    end
+end
+
+--winIndex = 3
+function shipNetPage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.buttons = {
+        { text = "<  SHIPNET  >", x = self.width / 2 - 5, y = 1,               blitF = genStr(title, 13), blitB = genStr(bg, 13) },
+        { text = "set",           x = 2,                  y = self.height - 1, blitF = genStr(bg, 3),     blitB = genStr(select, 3) },
+        { text = "connect",       x = self.width - 7,     y = self.height - 1, blitF = genStr(bg, 7),     blitB = genStr(select, 7) },
+    }
+    self.otherButtons = {
+        { text = "      v      ", x = 2, y = self.height - 2, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+        { text = "      ^      ", x = 2, y = 2,               blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+    }
+    self.callBlink = 10
+    self.callInBlink = 10
+    self.pageIndex = 1
+end
+
+function shipNetPage:refresh()
+    self.window.setBackgroundColor(getColorDec(properties.bg))
+    self.window.clear()
+    self.window.setCursorPos(1, 1)
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos
+    if info ~= -1 then --页面拼接
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+        if info.row == 1 then yPos = yPos + 1 end
+    else
+        width, height, xPos, yPos = self.width, self.height, 1, 1
+    end
+
+    local sp, ep = 1, #self.buttons
+    if info ~= -1 then --页面拼接时把下面两个分项按钮移到底部
+        if info.maxRow > 1 and yPos > 1 then
+            sp = 2
+        elseif info.maxRow > 1 and yPos == 1 then
+            sp, ep = 1, 1
+        end
+    end
+
+    if #callList > 0 then --收到连接请求
+        if self.callInBlink % 2 == 0 then
+            self.buttons[3].blitF = genStr(select, 7)
+            self.buttons[3].blitB = genStr(bg, 7)
+        else
+            self.buttons[3].blitF = genStr(bg, 7)
+            self.buttons[3].blitB = genStr(select, 7)
+        end
+        self.callInBlink = self.callInBlink - 0.5 > 0 and self.callInBlink - 0.5 or 10
+    else
+        self.buttons[3].blitF = genStr(bg, 7)
+        self.buttons[3].blitB = genStr(select, 7)
+    end
+
+    for i = sp, ep, 1 do
+        local x, y = self.buttons[i].x, self.buttons[i].y
+        if i > 1 then y = height - yPos end
+        if yPos > 1 then y = y - 1 end
+        self.window.setCursorPos(x, y)
+        self.window.blit(self.buttons[i].text, self.buttons[i].blitF, self.buttons[i].blitB)
+    end
+
+
+    if #shipNet_list > height - 5 then --如果超过一页, 显示翻页键
+        local x, y = (self.width - #self.otherButtons[1].text) / 2 + 1, height - yPos - 1
+        if yPos > 1 then y = y - 1 end
+        self.window.setCursorPos(x, y)
+        self.window.blit(self.otherButtons[1].text, self.otherButtons[1].blitF, self.otherButtons[1].blitB)
+        if self.pageIndex > 1 then
+            self.window.setCursorPos(x, 2)
+            self.window.blit(self.otherButtons[2].text, self.otherButtons[2].blitF, self.otherButtons[2].blitB)
+        end
+    end
+
+    ---------连接中的船区分颜色---------
+    local listLen = height - 5
+    local index = #shipNet_list > height - 5 and listLen * (self.pageIndex - 1) + 2 - yPos or 2 - yPos --融合窗口中每页从第几个开始打印)
+    local count = 1
+    for i = index, index + listLen - 1, 1 do
+        if not shipNet_list[i] then break end
+        local s, id = shipNet_list[i].name, shipNet_list[i].id
+        if #s > self.width - 2 then
+            s = string.sub(s, 1, self.width - 2)
+        end
+        local x, y = 2, 2 + count
+        count = count + 1
+        if y > 2 then
+            self.window.setCursorPos(x, y)
+            local flagF, flagBg = font, bg
+
+            if id == calling then --如果正在呼叫对方
+                if self.callBlink % 2 == 0 then
+                    flagF, flagBg = "f", select
+                else
+                    flagF, flagBg = select, bg
+                end
+                self.callBlink = self.callBlink - 0.25 > 0 and self.callBlink - 0.25 or 10
+            elseif id == parentShip.id then --如果是父级飞船
+                flagF, flagBg = bg, "d"
+            else
+                for k, v in pairs(childShips) do --如果是子级飞船
+                    if table.contains(v, id) then
+                        flagF, flagBg = bg, "b"
+                        break
+                    end
+                end
+            end
+
+            self.window.blit(s, genStr(flagF, #s), genStr(flagBg, #s))
+        end
+    end
+end
+
+function shipNetPage:onTouch(x, y)
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos, maxRow
+    if info ~= -1 then
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+        maxRow = info.maxRow
+        if info.row == 1 then
+            yPos = yPos + 1
+            self:nextPage(x, y)
+        end
+    else
+        width, height, xPos, yPos, maxRow = self.width, self.height, 1, 1, 1
+        self:nextPage(x, y)
+    end
+
+    if x >= 2 and x <= self.width - 1 then
+        local listLen = height - 5
+        if #shipNet_list > listLen then --翻页键
+            local maxPage = math.ceil(#shipNet_list / listLen)
+            if y == 2 then
+                self.pageIndex = self.pageIndex - 1
+                self.pageIndex = self.pageIndex < 1 and maxPage or self.pageIndex
+            elseif y == self.height - 2 then
+                self.pageIndex = self.pageIndex + 1
+                self.pageIndex = self.pageIndex > maxPage and 1 or self.pageIndex
+            end
+        end
+
+        if self.row == maxRow or info == -1 then
+            if y == self.height - 1 then
+                if x >= 2 and x <= 2 + 3 then
+                    properties.winIndex[self.name][self.row][self.column] = 16
+                elseif x >= self.width - 7 then
+                    properties.winIndex[self.name][self.row][self.column] = 17
+                end
+            end
+        end
+
+        if (self.pageIndex == 1 and (y > 2)) or (self.pageIndex > 1 and y > 1 and y < self.height - 2) then
+            local index = #shipNet_list > listLen and listLen * (self.pageIndex - 1) + 2 - yPos or
+                2 -
+                yPos --融合窗口中每页从第几个开始打印
+            index = y - 3 + index
+            if shipNet_list[index] then
+                shipNet_p2p_send(shipNet_list[index].id, "call")
+            end
+        end
+    end
+end
+
+--winIndex = 16
+function shipNet_set_Page:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 3
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "Anchorage",     x = 2, y = 2, blitF = genStr(other, 9),            blitB = genStr(bg, 9) },
+        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "rotate -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+
+function shipNet_set_Page:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+end
+
+function shipNet_set_Page:onTouch(x, y)
+    self:subPage_Back(x, y)
+end
+
+--winIndex = 17
+function shipNet_connect_Page:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 3
+    self.buttons = {
+        { text = "<", x = 1, y = 1, blitF = title, blitB = bg },
+    }
+    self.otherButtons = {
+        { text = "      v      ", x = 2, y = self.height - 2, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+        { text = "      ^      ", x = 2, y = 2,               blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+    }
+    self.maxList = self.height - 3
+    self.pageIndex = 1
+end
+
+function shipNet_connect_Page:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local list = {}
+    if parentShip.id ~= -1 then
+        table.insert(list, parentShip)
+    end
+
+    for k, v in pairs(childShips) do
+        table.insert(list, v)
+    end
+
+    if #list > self.maxList then
+        self.window.setCursorPos(2, self.height - 1)
+        self.window.blit(self.otherButtons[2].text, self.otherButtons[2].blitF, self.otherButtons[2].blitB)
+        if self.pageIndex == 1 then
+            self.window.setCursorPos(2, 2)
+            self.window.blit(self.otherButtons[1].text, self.otherButtons[1].blitF, self.otherButtons[1].blitB)
+        end
+    end
+
+    for i = 1, self.maxList, 1 do
+        local index = (self.pageIndex - 1) * self.maxList + i
+        if not list[index] then
+            break
+        end
+        local str = list[index].name
+        if #str > self.width - 3 then
+            str = string.sub(str, 1, self.width - 4)
+        end
+        str = str .. " x"
+        self.window.setCursorPos(2, 2 + i)
+        if list[index].id == parentShip.id and i == 1 then
+            self.window.blit(str, genStr(properties.bg, #str - 1) .. properties.font,
+                genStr("d", #str - 2) .. genStr(properties.bg, 2))
+        else
+            self.window.blit(str, genStr(properties.bg, #str - 1) .. properties.font,
+                genStr("b", #str - 2) .. genStr(properties.bg, 2))
+        end
+    end
+
+    if #callList > 0 then --收到请求弹窗
+        local str = callList[1].name
+        local halfWidth = self.width / 2
+        local halfHeight = self.height / 2
+        if #str < self.width then
+            str = genStr(" ", halfWidth - math.floor(#str / 2 + 0.5)) ..
+                str .. genStr(" ", halfWidth + math.floor(#str / 2 + 0.5))
+        end
+        self.window.setCursorPos(1, halfHeight - 1)
+        self.window.blit(str, genStr(properties.bg, #str), genStr(properties.other, #str))
+        local str2 = "connect? " .. callList[1].ct
+        if #str2 < self.width then
+            str2 = genStr(" ", halfWidth - math.floor(#str2 / 2 + 0.5)) ..
+                str2 .. genStr(" ", halfWidth + math.floor(#str2 / 2 + 0.5))
+        end
+        self.window.setCursorPos(1, halfHeight)
+        self.window.blit(str2, genStr(properties.bg, #str2), genStr(properties.other, #str2))
+        self.window.setCursorPos(halfWidth - 4, halfHeight + 2)
+        self.window.blit("yes", genStr(properties.bg, 3), genStr(properties.select, 3))
+        self.window.setCursorPos(halfWidth + 4, halfHeight + 2)
+        self.window.blit("no", genStr(properties.bg, 2), genStr(properties.select, 2))
+    end
+end
+
+function shipNet_connect_Page:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if parentShip.id ~= -1 then
+        self.window.setCursorPos(2, 3)
+    end
+
+    if #callList > 0 then --收到请求弹窗
+        local halfWidth = self.width / 2
+        local halfHeight = self.height / 2
+        if y == halfHeight + 2 then
+            if x >= halfWidth - 4 and x < halfWidth - 1 then
+                shipNet_p2p_send(callList[1].id, "agree")
+                local newChild = callList[1]
+                newChild.beat = beat_ct
+                table.insert(childShips, newChild)
+                table.remove(callList, 1)
+            elseif x >= halfWidth + 4 and x <= halfWidth + 6 then
+                shipNet_p2p_send(callList[1].id, "refuse")
+                table.remove(callList, 1)
+            end
+        end
+    else
+        local list = {}
+        if parentShip.id ~= -1 then
+            table.insert(list, parentShip)
+        end
+
+        for k, v in pairs(childShips) do
+            table.insert(list, v)
+        end
+        if #list > self.maxList then
+            local maxPage = math.ceil(#list / self.maxList)
+            if self.pageIndex < maxPage then
+                if y == self.height - 1 and x > 1 then
+                    self.pageIndex = self.pageIndex + 1 > maxPage and 1 or self.pageIndex + 1
+                end
+            end
+            if self.pageIndex > 1 then
+                if y == 2 and x > 1 then
+                    self.pageIndex = self.pageIndex - 1 > 1 and maxPage or self.pageIndex - 1
+                end
+            end
+        end
+
+        for i = 1, self.maxList, 1 do
+            local index = (self.pageIndex - 1) * self.maxList + i
+            if not list[index] then
+                break
+            end
+            local str = list[index].name
+            if #str > self.width - 3 then
+                str = string.sub(str, 1, self.width - 4)
+            end
+            str = str .. " x"
+            if y == 2 + i and x >= #str - 1 and x <= #str + 1 then
+                local i2 = i
+                if parentShip.id ~= -1 then
+                    if i == 1 then
+                        parentShip.id = -1
+                        break
+                    end
+                    i2 = i2 - 1
+                end
+                table.remove(childShips, i2)
+                break
+            end
+        end
+    end
+end
+
+--winIndex = 4
+function raderPage:init()
+end
+
+function raderPage:refresh()
+    self.window.setBackgroundColor(colors.black)
+    self.window.clear()
+    self.window.setCursorPos(1, 1)
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos
+    if info ~= -1 then
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+    else
+        width, height, xPos, yPos = self.width, self.height, 1, 1
+    end
+
+    local pixelDistance = 1 * (2 ^ properties.raderRange) / 2
+
+    for i = 1, width, 1 do
+        local xi = (i + 1) - xPos
+        if xi <= self.width and xi > 0 then
+            self.window.setCursorPos(xi, height / 2 - yPos)
+            self.window.blit("-", "8", "f")
+        end
+    end
+
+    for i = 1, height, 1 do
+        local yi = (i + 1) - yPos
+        if yi <= self.height and yi > 0 then
+            self.window.setCursorPos(width / 2 + 2 - xPos, yi)
+            self.window.blit("|", "8", "f")
+        end
+    end
+
+    local range = string.format("pix=%4d block", pixelDistance)
+    self.window.setCursorPos((width + 4 - 14) / 2 - xPos, height + 1 - yPos)
+    if info ~= -1 then
+        if self.row == info.maxRow then
+            self.window.setCursorPos((width + 4 - 14) / 2 - xPos, height - yPos)
+        end
+    end
+    self.window.blit(range, genStr(properties.bg, 14), genStr(properties.other, #range))
+
+    for i = 1, #shipNet_list, 1 do
+        local ship = shipNet_list[i]
+        local x, z = (ship.pos.x - attUtil.position.x) / pixelDistance, (ship.pos.z - attUtil.position.z) / pixelDistance
+        local tx, tz = math.abs(x), math.abs(z)
+        if (tx > 0 and tx <= width + 1) and (tz > 0 and tz <= height - 1) then
+            local point = MatrixMultiplication(attUtil.yawMatrix, { x = x, y = z })
+            point.y = point.y / 1.5
+            point = { x = width / 2 + 2 + point.x - xPos, y = height / 2 - point.y - yPos }
+            local bounds = {
+                x = point.x - (ship.size.x / 2) / pixelDistance,
+                y = point.y -
+                    (ship.size.z / 2) / pixelDistance
+            }
+            bounds.xStart = point.x - bounds.x
+            bounds.xEnd = point.x + bounds.x
+            bounds.yStart = point.y - bounds.y
+            bounds.yEnd = point.y + bounds.y
+            if point.x <= self.width + 1 and point.y <= self.height + 1 then
+                self.window.setCursorPos(point.x, point.y)
+                if ship.id == parentShip.id then
+                    self.window.blit(" ", " ", "5")
+                else
+                    local bgg = "8"
+                    for k, v in pairs(childShips) do
+                        if v.id == ship.id then
+                            bgg = "b"
+                            break
+                        end
+                    end
+
+                    self.window.blit(" ", " ", bgg)
+                end
+            end
+        end
+    end
+end
+
+function raderPage:onTouch(x, y)
+    self:nextPage(x, y)
+    local info = page_attach_manager:get(self.name, self.pageName, self.row, self.column)
+    local width, height, xPos, yPos
+    if info ~= -1 then
+        width = info.maxColumn * self.width
+        height = info.maxRow * self.height
+        xPos = (info.column - 1) * self.width + 1
+        yPos = (info.row - 1) * self.height
+    else
+        width, height, xPos, yPos = self.width, self.height, 1, 1
+    end
+
+    local tx, ty = (width + 4 - 14) / 2 - xPos, height + 1 - yPos
+    if info ~= -1 then
+        if self.row == info.maxRow then
+            tx, ty = (width + 4 - 14) / 2 - xPos, height - yPos
+        end
+    end
+
+    if y == ty then
+        if x >= tx and x < tx + 7 then
+            properties.raderRange = properties.raderRange - 1 < 1 and 1 or properties.raderRange - 1
+        elseif x > tx + 7 and x < tx + 14 then
+            properties.raderRange = properties.raderRange + 1 > 14 and 14 or properties.raderRange + 1
+        end
     end
 end
 
 --winIndex = 5
+function setPage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.buttons = {
+        { text = "<    SET    >", x = self.width / 2 - 5, y = 1,       blitF = genStr(title, 13), blitB = genStr(bg, 13) },
+        { text = "S_SpaceShip",   x = 2,                  pageId = 6,  y = 3,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_QuadFPV  ",   x = 2,                  pageId = 7,  y = 4,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_Helicopt ",   x = 2,                  pageId = 8,  y = 5,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_aitShip  ",   x = 2,                  pageId = 9,  y = 6,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "User_Change",   x = 2,                  pageId = 10, y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Home_Set   ",   x = 2,                  pageId = 11, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Simulate   ",   x = 2,                  pageId = 12, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Profile    ",   x = 2,                  pageId = 14, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false }
+    }
+    self.otherButtons = {
+        { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+        { text = "      ^      ", x = 2, y = 2,               blitF = genStr(bg, 13), blitB = genStr(other, 13) },
+    }
+    self.pageIndex = 1
+    self.cutRow = 4
+end
+
+function setPage:refresh()
+    self:refreshButtons(1, self.pageIndex, self.cutRow)
+    if #self.buttons > self.height - self.cutRow then
+        if self.pageIndex == 1 or self.pageIndex * (self.height - self.cutRow) < #self.buttons - 1 then
+            local bt = self.otherButtons[1]
+            self.window.setCursorPos(bt.x, bt.y)
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+        if self.pageIndex > 1 then
+            local bt = self.otherButtons[2]
+            self.window.setCursorPos(bt.x, bt.y)
+            self.window.blit(bt.text, bt.blitF, bt.blitB)
+        end
+    end
+    for k, v in pairs(self.buttons) do
+        if v.selected then
+            local yPos = v.y - (self.pageIndex - 1) * (self.height - self.cutRow)
+            if yPos > 2 and yPos < self.height - 1 then
+                self.window.setCursorPos(v.x, v.y - (self.pageIndex - 1) * (self.height - self.cutRow))
+                self.window.blit(v.text, v.blitB, v.select)
+            end
+        end
+    end
+end
+
+function setPage:onTouch(x, y)
+    self:nextPage(x, y)
+    if y == 2 then
+        if self.pageIndex > 1 then
+            self.pageIndex = self.pageIndex - 1
+        end
+    elseif y < self.height - 1 and y > 2 then
+        for k, v in pairs(self.buttons) do
+            if v.y > 1 then
+                if x >= v.x and x < v.x + #v.text and y == v.y - (self.pageIndex - 1) * (self.height - 4) then
+                    if not v.selected then
+                        v.selected = true
+                    else
+                        self.windows[self.row][self.column][v.pageId].indexFlag = 5
+                        properties.winIndex[self.name][self.row][self.column] = v.pageId
+                    end
+                else
+                    v.selected = false
+                end
+            end
+        end
+    elseif y == self.otherButtons[1].y then
+        if #self.buttons - 1 > self.pageIndex * (self.height - 4) then
+            self.pageIndex = self.pageIndex + 1
+        else
+            self.pageIndex = 1
+        end
+    end
+end
+
+--winIndex = 6
 function set_spaceShip:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                           blitB = bg },
         { text = "P: --      ++", x = 2, y = 3, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
@@ -1782,11 +2400,11 @@ function set_spaceShip:onTouch(x, y)
     end
 end
 
---winIndex = 6
+--winIndex = 7
 function set_quadFPV:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                           blitB = bg },
         { text = "P: --      ++", x = 2, y = 3, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
@@ -1836,9 +2454,9 @@ function set_quadFPV:onTouch(x, y)
             if y == 3 then
                 profile.quad_P = profile.quad_P + result < 0 and 0 or profile.quad_P + result
             elseif y == 4 then
-                profile.quad_D = profile.quad_D + result < 0 and 0 or profile.quad_P + result
+                profile.quad_D = profile.quad_D + result < 0 and 0 or profile.quad_D + result
             elseif y == 5 then
-                profile.quad_Acc = profile.quad_Acc + result < 0 and 0 or profile.quad_P + result
+                profile.quad_Acc = profile.quad_Acc + result < 0 and 0 or profile.quad_Acc + result
             end
         end
     end
@@ -1863,11 +2481,11 @@ function set_quadFPV:onTouch(x, y)
     end
 end
 
---winIndex = 7
+--winIndex = 8
 function set_helicopter:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                         blitB = bg },
         { text = "Yaw_P--    ++", x = 2, y = 3, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
@@ -1938,11 +2556,11 @@ function set_helicopter:onTouch(x, y)
     end
 end
 
---winIndex = 8
+--winIndex = 9
 function set_airShip:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                         blitB = bg },
         { text = "Rot_P--    ++", x = 2, y = 3, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
@@ -1994,10 +2612,10 @@ function set_airShip:onTouch(x, y)
     end
 end
 
---winIndex = 9
+--winIndex = 10
 function set_user:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",           x = 1, y = 1, blitF = title,             blitB = bg },
         { text = "selectUser:", x = 2, y = 2, blitF = genStr(other, 11), blitB = genStr(bg, 11) },
@@ -2032,10 +2650,10 @@ function set_user:onTouch(x, y)
     end
 end
 
---winIndex = 10
+--winIndex = 11
 function set_home:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<", x = 1, y = 1, blitF = title, blitB = bg }
     }
@@ -2050,10 +2668,10 @@ function set_home:onTouch(x, y)
     self:subPage_Back(x, y)
 end
 
---winIndex = 11
+--winIndex = 12
 function set_simulate:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
         { text = "AirMass-    +", x = 1, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
@@ -2093,10 +2711,10 @@ function set_simulate:onTouch(x, y)
     end
 end
 
---winIndex = 12
+--winIndex = 13
 function set_att:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<", x = 1,                  y = 1,                   blitF = title, blitB = bg },
         { text = "w", x = self.width / 2 - 5, y = self.height / 2,     blitF = font,  blitB = bg },
@@ -2141,10 +2759,10 @@ function set_att:onTouch(x, y)
     end
 end
 
---winIndex = 13
+--winIndex = 14
 function set_profile:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",        x = 1, y = 1, blitF = title,           blitB = bg },
         { text = "keyboard", x = 2, y = 3, blitF = genStr(font, 8), blitB = genStr(bg, 8) },
@@ -2175,11 +2793,11 @@ function set_profile:onTouch(x, y)
     end
 end
 
---winIndex = 14
+--winIndex = 15
 function set_colortheme:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 4
+    self.indexFlag = 5
     self.buttons = {
         { text = "<",          x = 1, y = 1, blitF = title,            blitB = bg },
         { text = "font      ", x = 4, y = 3, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(font, 2) },
@@ -2284,33 +2902,28 @@ function page_attach_manager:get(mName, pageName, row, column)
     if self[mName] then
         for k, v in pairs(self[mName][pageName]) do
             if (row >= v.rowStart and row <= v.rowEnd) and (column >= v.columnStart and column <= v.columnEnd) then
-                return {
-                    group = v.group,
-                    row = row + 1 - v.rowStart,
-                    maxRow = v.rowEnd + 1 - v.rowStart,
-                    column = column + 1 - v.columnStart,
-                    maxColumn = v.columnEnd + 1 - v.columnStart
-                }
+                v.row = row + 1 - v.rowStart
+                v.maxRow = v.rowEnd + 1 - v.rowStart
+                v.column = column + 1 - v.columnStart
+                v.maxColumn = v.columnEnd + 1 - v.columnStart
+                return v
             end
         end
     end
     return -1
 end
 
-function page_attach_manager:test()
-    for k, v in pairs(self["monitor_12"]) do
-        for k2, v2 in pairs(v) do
-            commands.execAsync(("say %s=%s"):format(k, v))
-        end
+function abstractMonitor:page_attach_util(name)
+    local pageId
+    if name == "attPage" then
+        pageId = 2
+    elseif name == "shipNetPage" then
+        pageId = 3
+    elseif name == "raderPage" then
+        pageId = 4
     end
-end
-
-function abstractMonitor:refresh_page_attach()
-    if not page_attach_manager[self.name] then
-        page_attach_manager[self.name] = {}
-    end
-    local att = {}
-    page_attach_manager[self.name]["attPage"] = att
+    local result = {}
+    page_attach_manager[self.name][name] = result
     local wi = 1
     local group = 0
     while true do --总行数
@@ -2327,7 +2940,7 @@ function abstractMonitor:refresh_page_attach()
                 local j = columnStart
                 while true do
                     if j > columnEnd then break end
-                    if properties.winIndex[self.name][i][j] == 3 then --attPage = 3
+                    if properties.winIndex[self.name][i][j] == pageId then
                         if i == rowStart then columnCount = columnCount + 1 end
                     else
                         if i == rowStart and columnCount > 0 then
@@ -2343,14 +2956,13 @@ function abstractMonitor:refresh_page_attach()
             ::continue::
             if rowCount > 1 or columnCount > 1 then
                 group = group + 1
-                table.insert(att,
-                    {
-                        group = group,
-                        rowStart = rowStart,
-                        rowEnd = rowStart - 1 + rowCount,
-                        columnStart = columnStart,
-                        columnEnd = columnStart - 1 + columnCount
-                    })
+                table.insert(result, {
+                    group = group,
+                    rowStart = rowStart,
+                    rowEnd = rowStart - 1 + rowCount,
+                    columnStart = columnStart,
+                    columnEnd = columnStart - 1 + columnCount
+                })
             end
             wj = columnCount == 0 and wj + 1 or wj + columnCount
             if wi == 1 then
@@ -2361,6 +2973,15 @@ function abstractMonitor:refresh_page_attach()
         end
         wi = minRowAdd == 0 and wi + 1 or wi + minRowAdd
     end
+end
+
+function abstractMonitor:refresh_page_attach()
+    if not page_attach_manager[self.name] then
+        page_attach_manager[self.name] = {}
+    end
+    self:page_attach_util("attPage")
+    self:page_attach_util("shipNetPage")
+    self:page_attach_util("raderPage")
 end
 
 function abstractMonitor:refresh()
@@ -2718,6 +3339,182 @@ function monitorUtil.getMonitorSort(name)
     return -1
 end
 
+---------broadcast---------
+beat_ct, call_ct, captcha, calling = 2, 0, genCaptcha(), -1
+local shipNet_beat = function() --广播
+    while true do
+        if not shutdown_flag then
+            ---------发送广播---------
+            local broadcast_msg = {
+                name = shipName,
+                id = computerId,
+                request_connect = "broadcast",
+                pos = ship.getWorldspacePosition(),
+                size = ship.getSize()
+            }
+            rednet.broadcast(broadcast_msg, public_protocol)
+
+            ---------公频广播心跳包---------
+            local index = 1
+            while true do
+                if index > #shipNet_list then break end
+                shipNet_list[index].beat = shipNet_list[index].beat - 1
+                if shipNet_list[index].beat < 1 then
+                    if shipNet_list[index].id == parentShip.id then
+                        parentShip.id = -1
+                    end
+                    table.remove(shipNet_list, index)
+                    index = index - 1
+                end
+
+                index = index + 1
+            end
+
+            ---------父级飞船心跳包---------
+            if parentShip.id ~= -1 then
+                parentShip.beat = parentShip.beat - 1
+                if parentShip.beat <= 0 then
+                    parentShip.id = -1
+                end
+            end
+
+            ---------子级飞船心跳包---------
+            local i2 = 1
+            while true do
+                if i2 > #childShips then break end
+                childShips[i2].beat = childShips[i2].beat - 1
+                if childShips[i2].beat <= 0 then
+                    table.remove(childShips, i2)
+                    i2 = i2 - 1
+                end
+                i2 = i2 + 1
+            end
+
+            if parentShip.id ~= -1 then --给父级发送心跳包
+                shipNet_p2p_send(parentShip.id, "beat")
+            end
+
+            for k, v in pairs(childShips) do --给子级发送心跳包
+                shipNet_p2p_send(v.id, "beat")
+            end
+
+            ---------呼叫计时器---------
+            if call_ct > 0 then --已在呼叫中
+                call_ct = call_ct - 1
+            else                --未在呼叫或呼叫超时
+                call_ct = 0
+                calling = -1
+            end
+
+            ---------呼叫请求计时器---------
+            if #callList > 0 then --未处理的呼叫请求
+                for k, v in pairs(callList) do
+                    v.ct = v.ct - 1
+                end
+                if callList[1].ct <= 0 then --未处理请求超时
+                    table.remove(callList, 1)
+                end
+            end
+        end
+        sleep(1)
+    end
+end
+
+local shipNet_getMessage = function() --从广播中筛选
+    while true do
+        if not shutdown_flag then
+            local id, msg = rednet.receive(public_protocol)     --船舶信息广播
+
+            if id == parentShip.id and msg.code == captcha then --父级飞船发来的消息
+                if msg.pos then
+                    parentShip = msg
+                    parentShip.beat = beat_ct
+                end
+            end
+
+            if msg == "beat" then
+                for k, v in pairs(childShips) do
+                    if id == v.id then
+                        v.beat = beat_ct
+                    end
+                end
+            end
+
+            if type(msg) == "table" then
+                if msg.request_connect == "broadcast" then --收到公频广播
+                    local flag = false
+                    for i = 1, #shipNet_list, 1 do
+                        if table.contains(shipNet_list[i], msg.name) then
+                            msg.beat = beat_ct
+                            shipNet_list[i] = msg
+                            flag = true
+                            break
+                        end
+                    end
+                    if not flag then
+                        msg.beat = beat_ct
+                        table.insert(shipNet_list, msg)
+                    end
+                elseif msg.request_connect == "call" and msg.name and msg.code then            --收到连接请求
+                    table.insert(callList, { id = id, name = msg.name, code = msg.code, ct = 10 })
+                elseif msg.request_connect == "back" and msg.name and msg.code == captcha then --回听请求是否被接受
+                    if msg.result == "agree" then
+                        parentShip.id = id
+                        parentShip.name = msg.name
+                        parentShip.beat = beat_ct
+                        parentShip.code = captcha
+                        parentShip.pos = DEFAULT_PARENT_SHIP.pos
+                        parentShip.quat = DEFAULT_PARENT_SHIP.quat
+                        parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
+                    else
+                        parentShip.id = -1
+                    end
+                    call_ct = 0
+                    calling = -1
+                end
+            end
+        else
+            sleep(0.5)
+        end
+    end
+end
+
+local shipNet_run = function() --启动船舶网络
+    parallel.waitForAll(shipNet_beat, shipNet_getMessage)
+end
+
+shipNet_p2p_send = function(id, type) --发送p2p
+    if type == "call" then            --请求父级连接
+        if call_ct <= 0 and id ~= parentShip.id then
+            rednet.send(id, { name = shipName, code = captcha, request_connect = "call" }, public_protocol)
+            calling = id
+            call_ct = 10
+        end
+    elseif type == "agree" or type == "refuse" then --回复子级连接
+        rednet.send(id, { name = shipName, code = callList[1].code, request_connect = "back", result = type },
+            public_protocol)
+    elseif type == "beat" then --向父级发送心跳包
+        rednet.send(id, "beat", public_protocol)
+    end
+end
+
+local send_to_childShips = function()
+    if #childShips > 0 then
+        for k, v in pairs(childShips) do
+            local msg = {
+                id = computerId,
+                name = shipName,
+                pos = attUtil.position,
+                quat = attUtil.quat,
+                velocity = attUtil.velocity,
+                size = attUtil.size,
+                code = v.code
+            }
+            rednet.send(v.id, msg, public_protocol)
+        end
+    end
+end
+
 ---------main---------
 
 system.init()
@@ -2727,7 +3524,8 @@ if term.isColor() then
 end
 
 function flightUpdate()
-    if ship.isStatic() then
+    send_to_childShips()
+    if ship.isStatic() or engineOff then
         --static
     elseif properties.mode == 1 then
         pdControl.spaceShip()
@@ -2745,6 +3543,12 @@ function flightUpdate()
         pdControl.goHome()
     elseif properties.mode == 8 then
         pdControl.pointLoop()
+    elseif properties.mode == 9 then
+        pdControl.ShipCamera()
+    elseif properties.mode == 10 then
+        commands.execAsync("say 10")
+    elseif properties.mode == 11 then
+        commands.execAsync("say 11")
     end
 end
 
@@ -2770,7 +3574,7 @@ local testRun = function(phys)
     end
 end
 
-function listener()
+local listener = function()
     while true do
         local eventData = { os.pullEvent() }
         local event = eventData[1]
@@ -2779,6 +3583,7 @@ function listener()
             if physics_flag then
                 physics_flag = false
             end
+            --commands.execAsync(("say phy"))
             testRun(eventData[2])
         end
 
@@ -2800,14 +3605,14 @@ function listener()
     end
 end
 
-function run()
-    parallel.waitForAll(runFlight, listener)
+local all_listener = function()
+    parallel.waitForAll(listener, shipNet_run)
 end
 
-function runFlight()
+local runFlight = function()
     sleep(0.1)
     if physics_flag then
-        pdControl.basicYSpeed = 30
+        pdControl.basicYSpeed = 29.5
         pdControl.helicopt_P_multiply = 1.5
         pdControl.helicopt_D_multiply = 4
         pdControl.rot_P_multiply = 1.5
@@ -2833,7 +3638,11 @@ function runFlight()
     end
 end
 
-function refreshDisplay()
+function run()
+    parallel.waitForAll(runFlight, all_listener)
+end
+
+local refreshDisplay = function()
     sleep(0.1)
     while true do
         if shutdown_flag then
