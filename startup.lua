@@ -38,6 +38,7 @@ local DEFAULT_PARENT_SHIP = {
     name = "",
     pos = { x = 0, y = 0, z = 0 },
     quat = { w = 0, x = 0, y = 0, z = 0 },
+    preQuat = { w = 0, x = 0, y = 0, z = 0 },
     velocity = { x = 0, y = 0, z = 0 },
     size = ship.getSize(),
     beat = beat_ct
@@ -60,17 +61,6 @@ system.init = function()
                 properties[k] = tmpProp[k]
             end
         end
-        tmpProp = system.reset()
-        for k, v in pairs(tmpProp.profile.keyboard) do
-            if not properties.profile.keyboard[k] then
-                properties.profile.keyboard[k] = v
-            end
-        end
-        for k, v in pairs(tmpProp.profile.joyStick) do
-            if not properties.profile.joyStick[k] then
-                properties.profile.joyStick[k] = v
-            end
-        end
 
         if not type(properties.mode) == "number" then properties.mode = 1 end
 
@@ -78,6 +68,7 @@ system.init = function()
         if properties.profile.keyboard.quad_D > 3.52 then properties.profile.keyboard.quad_D = 3.52 end
         if properties.profile.joyStick.spaceShip_D > 3.52 then properties.profile.joyStick.spaceShip_D = 3.52 end
         if properties.profile.joyStick.quad_D > 3.52 then properties.profile.joyStick.quad_D = 3.52 end
+
         system.file:close()
     else
         properties = system.reset()
@@ -102,6 +93,7 @@ system.reset = function()
         winIndex = {},
         profileIndex = "joyStick",
         raderRange = 1,
+        integral = 0,
         profile = {
             keyboard = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
@@ -122,6 +114,8 @@ system.reset = function()
                 airShip_ROT_P = 1,
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
+                camera_rot_speed = 0.2,
+                camera_move_speed = 0.2,
             },
             joyStick = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
@@ -142,6 +136,8 @@ system.reset = function()
                 airShip_ROT_P = 1,
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
+                camera_rot_speed = 1,
+                camera_move_speed = 1,
             }
         },
         lock = false,
@@ -155,7 +151,7 @@ system.reset = function()
         title = "3",
         select = "3",
         other = "7",
-        MAX_MOVE_SPEED = 299,                   --自动驾驶 (点循环、跟随模式) 最大跟随速度
+        MAX_MOVE_SPEED = 99,                    --自动驾驶最大跟随速度
         pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         pointList = {                           --点循环模式，按照顺序逐个前往
@@ -279,6 +275,10 @@ function resetAngelRange(angle)
     else
         return angle
     end
+end
+
+function resetAngelRangeRad(angle)
+    return math.rad(resetAngelRange(math.deg(angle)))
 end
 
 local genCaptcha = function(len)
@@ -905,7 +905,7 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
     d = d * pdControl.move_D_multiply
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
+    pdControl.ySpeed = pdControl.basicYSpeed + -attUtil.velocity.y * d
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
@@ -914,11 +914,11 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
     if sidemove_p then
         sidemove_p = sidemove_p * pdControl.move_P_multiply
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
-            0,
+        yVal * p * attUtil.mass ,
             zVal * sidemove_p * attUtil.mass)
     else
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
-            0,
+        yVal * p * attUtil.mass,
             zVal * p * attUtil.mass)
     end
 end
@@ -929,7 +929,7 @@ pdControl.quadUp = function(yVal, p, d, hov)
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
         pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p +
-            pdControl.basicYSpeed * 2 + -omegaApplyRot.y * d
+            pdControl.basicYSpeed + -omegaApplyRot.y * d
     else
         pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p
     end
@@ -943,9 +943,15 @@ pdControl.quadUp = function(yVal, p, d, hov)
     pdControl.ySpeed = copysign((attUtil.velocity.y ^ 2) * pdControl.airMass_multiply * properties.airMass,
         -attUtil.velocity.y)
 
-    ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
+    if yVal == 0 and properties.mode ~= 3 then
+        ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass + properties.gravity * pdControl.basicYSpeed * attUtil.mass,
         pdControl.zSpeed * attUtil.mass)
+    else
+        ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
+        pdControl.ySpeed * attUtil.mass,
+        pdControl.zSpeed * attUtil.mass)
+    end
 end
 
 pdControl.rotInner = function(xRot, yRot, zRot, p, d)
@@ -1280,15 +1286,24 @@ local cameraQuat = { w = -1, x = 0, y = 0, z = 0 }
 local xOffset = 0
 pdControl.ShipCamera = function()
     if parentShip.id ~= -1 then
-        xOffset = xOffset + math.asin(joyUtil.BTStick.y)
+        xOffset = xOffset + math.asin(joyUtil.BTStick.y * properties.profile[properties.profileIndex].camera_move_speed)
         xOffset = xOffset < 3 and 3 or xOffset
-        xOffset = xOffset > 32 and 32 or xOffset
-        local range = { x = -parentShip.size.x - xOffset, y = 0, z = 0 }
+        xOffset = xOffset > 64 and 64 or xOffset
+        local maxSize = math.max(parentShip.size.x, parentShip.size.z)
+        maxSize = math.max(maxSize, parentShip.size.y)
+        local range = { x = -maxSize - xOffset, y = 0, z = 0 }
         local pos = parentShip.pos
         pos.x = pos.x + parentShip.velocity.x
         pos.y = pos.y + parentShip.velocity.y
         pos.z = pos.z + parentShip.velocity.z
-        local myRot = euler2Quat(0, math.asin(joyUtil.LeftStick.x) / 16, math.asin(joyUtil.LeftStick.y) / 16)
+        local speedMult = xOffset * 2
+        speedMult = speedMult < 16 and 16 or speedMult
+        local myRot = euler2Quat(
+            math.asin(joyUtil.RightStick.x) / 16 * properties.profile[properties.profileIndex].camera_rot_speed,
+            math.asin(joyUtil.LeftStick.x) / speedMult * properties.profile[properties.profileIndex].camera_rot_speed,
+            math.asin(joyUtil.LeftStick.y) / speedMult * properties.profile[properties.profileIndex].camera_rot_speed
+        )
+
         cameraQuat = quatMultiply(cameraQuat, myRot)
         range = RotateVectorByQuat(cameraQuat, range)
         pos.x = pos.x + range.x
@@ -1296,8 +1311,6 @@ pdControl.ShipCamera = function()
         pos.z = pos.z + range.z
         pdControl.rotate2quat(getConjQuat(cameraQuat), 0.9, 2.8)
         pdControl.gotoPosition(nil, pos)
-    else
-        range = nil
     end
 end
 ---------screens---------
@@ -1449,28 +1462,33 @@ local set_profile          = setmetatable({ pageId = 14, pageName = "profile" },
 local set_colortheme       = setmetatable({ pageId = 15, pageName = "colortheme" }, { __index = abstractWindow })
 local shipNet_set_Page     = setmetatable({ pageId = 16, pageName = "shipNet_set" }, { __index = abstractWindow })
 local shipNet_connect_Page = setmetatable({ pageId = 17, pageName = "shipNet_call" }, { __index = abstractWindow })
-local ShipCamera           = setmetatable({ pageId = 18, pageName = "ShipCamera" }, { __index = abstractWindow })
-local ShipFollow           = setmetatable({ pageId = 19, pageName = "ShipFollow" }, { __index = abstractWindow })
-local Anchorage            = setmetatable({ pageId = 20, pageName = "Anchorage" }, { __index = abstractWindow })
+local set_camera           = setmetatable({ pageId = 18, pageName = "set_camera" }, { __index = abstractWindow })
+local set_shipFollow       = setmetatable({ pageId = 19, pageName = "set_shipFollow" }, { __index = abstractWindow })
+local set_anchorage        = setmetatable({ pageId = 20, pageName = "set_anchorage" }, { __index = abstractWindow })
+local mass_fix             = setmetatable({ pageId = 20, pageName = "mass_fix" }, { __index = abstractWindow })
 
 flightPages                = {
-    modPage,             --1
-    attPage,             --2
-    shipNetPage,         --3
-    raderPage,           --4
-    setPage,             --5
-    set_spaceShip,       --6
-    set_quadFPV,         --7
-    set_helicopter,      --8
-    set_airShip,         --9
-    set_user,            --10
-    set_home,            --11
-    set_simulate,        --12
-    set_att,             --13
-    set_profile,         --14
-    set_colortheme,      --15
-    shipNet_set_Page,    --16
-    shipNet_connect_Page --17
+    modPage,              --1
+    attPage,              --2
+    shipNetPage,          --3
+    raderPage,            --4
+    setPage,              --5
+    set_spaceShip,        --6
+    set_quadFPV,          --7
+    set_helicopter,       --8
+    set_airShip,          --9
+    set_user,             --10
+    set_home,             --11
+    set_simulate,         --12
+    set_att,              --13
+    set_profile,          --14
+    set_colortheme,       --15
+    shipNet_set_Page,     --16
+    shipNet_connect_Page, --17
+    set_camera,           --18
+    set_shipFollow,       --19
+    set_anchorage,        --20
+    mass_fix,             --21
 }
 
 --winIndex = 1
@@ -1962,23 +1980,45 @@ function shipNet_set_Page:init()
         properties.other
     self.indexFlag = 3
     self.buttons = {
-        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
-        { text = "Anchorage",     x = 2, y = 2, blitF = genStr(other, 9),            blitB = genStr(bg, 9) },
-        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "rotate -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "<",             x = 1, y = 1, blitF = title,            blitB = bg },
+        { text = "set_camera",    x = 2, y = 3, blitF = genStr(font, 10), blitB = genStr(bg, 10), select = genStr(select, 10), flag = false },
+        { text = "set_follow",    x = 2, y = 4, blitF = genStr(font, 10), blitB = genStr(bg, 10), select = genStr(select, 10), flag = false },
+        { text = "set_anchorage", x = 2, y = 5, blitF = genStr(font, 13), blitB = genStr(bg, 13), select = genStr(select, 13), flag = false },
     }
 end
 
 function shipNet_set_Page:refresh()
     self:refreshButtons()
     self:refreshTitle()
-    local profile = properties.profile[properties.profileIndex]
+    for k, v in pairs(self.buttons) do
+        if v.flag then
+            self.window.setCursorPos(v.x, v.y)
+            self.window.blit(v.text, v.blitB, v.select)
+        end
+    end
 end
 
 function shipNet_set_Page:onTouch(x, y)
     self:subPage_Back(x, y)
+    if x > 2 and y > 1 and y <= #self.buttons + 1 then
+        for k, v in pairs(self.buttons) do
+            if y == v.y and x >= v.x and x <= v.x + #v.text then
+                if v.flag then
+                    if v.text == "set_camera" then
+                        properties.winIndex[self.name][self.row][self.column] = 18
+                    elseif v.text == "set_follow" then
+                        properties.winIndex[self.name][self.row][self.column] = 19
+                    elseif v.text == "set_anchorage" then
+                        properties.winIndex[self.name][self.row][self.column] = 20
+                    end
+                else
+                    v.flag = true
+                end
+            else
+                v.flag = false
+            end
+        end
+    end
 end
 
 --winIndex = 17
@@ -2132,6 +2172,96 @@ function shipNet_connect_Page:onTouch(x, y)
     end
 end
 
+--winIndex = 18
+function set_camera:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 16
+    self.buttons = {
+        { text = "<",              x = 1, y = 1, blitF = title,                      blitB = bg },
+        { text = "rotSpeed -   +", x = 2, y = 3, blitF = genStr(font, 9) .. "fffff", blitB = genStr(bg, 9) .. "b" .. genStr(bg, 3) .. "e" },
+        { text = "moveSpeed-   +", x = 2, y = 5, blitF = genStr(font, 9) .. "fffff", blitB = genStr(bg, 9) .. "b" .. genStr(bg, 3) .. "e" },
+    }
+end
+
+function set_camera:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setCursorPos(12, self.buttons[2].y)
+    self.window.blit(string.format("%0.1f", profile.camera_rot_speed), genStr(properties.font, 3),
+        genStr(properties.bg, 3))
+    self.window.setCursorPos(12, self.buttons[3].y)
+    self.window.blit(string.format("%0.1f", profile.camera_move_speed), genStr(properties.font, 3),
+        genStr(properties.bg, 3))
+end
+
+function set_camera:onTouch(x, y)
+    self:subPage_Back(x, y)
+    local profile = properties.profile[properties.profileIndex]
+    if y == self.buttons[2].y then
+        if x == 11 then
+            profile.camera_rot_speed = profile.camera_rot_speed - 0.1 < 0 and 0.1 or profile.camera_rot_speed - 0.1
+        elseif x == 15 then
+            profile.camera_rot_speed = profile.camera_rot_speed + 0.1 > 1 and 1 or profile.camera_rot_speed + 0.1
+        end
+    elseif y == self.buttons[3].y then
+        if x == 11 then
+            profile.camera_move_speed = profile.camera_move_speed - 0.1 < 0 and 0.1 or profile.camera_move_speed - 0.1
+        elseif x == 15 then
+            profile.camera_move_speed = profile.camera_move_speed + 0.1 > 1 and 1 or profile.camera_move_speed + 0.1
+        end
+    end
+end
+
+--winIndex = 19
+function set_shipFollow:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 16
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "rotate -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+
+function set_shipFollow:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+end
+
+function set_shipFollow:onTouch(x, y)
+    self:subPage_Back(x, y)
+end
+
+--winIndex = 20
+function set_anchorage:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 16
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "rotate -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+
+function set_anchorage:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+end
+
+function set_anchorage:onTouch(x, y)
+    self:subPage_Back(x, y)
+end
+
 --winIndex = 4
 function raderPage:init()
 end
@@ -2259,7 +2389,8 @@ function setPage:init()
         { text = "Simulate   ",   x = 2,                  pageId = 12, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Profile    ",   x = 2,                  pageId = 14, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false }
+        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "MassFix",       x = 2,                  pageId = 21, y = 13,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
     }
     self.otherButtons = {
         { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
@@ -2833,6 +2964,27 @@ function set_colortheme:onTouch(x, y)
         end
     end
     self:init()
+end
+
+--winIndex=21
+function mass_fix:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 5
+    self.buttons = {
+        { text = "<",          x = 1, y = 1, blitF = title,            blitB = bg },
+        { text = "font      ", x = 4, y = 3, blitF = genStr(font, 10), blitB = genStr(bg, 10), prt = genStr(font, 2) },
+    }
+    self.indexFlag = 5
+end
+
+function mass_fix:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+end
+
+function mass_fix:onTouch(x, y)
+    self:subPage_Back(x, y)
 end
 
 abstractMonitor = setmetatable({}, { __index = abstractScreen })
@@ -3465,6 +3617,7 @@ local shipNet_getMessage = function() --从广播中筛选
                         parentShip.code = captcha
                         parentShip.pos = DEFAULT_PARENT_SHIP.pos
                         parentShip.quat = DEFAULT_PARENT_SHIP.quat
+                        parentShip.preQuat = DEFAULT_PARENT_SHIP.quat
                         parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
                     else
                         parentShip.id = -1
@@ -3506,6 +3659,7 @@ local send_to_childShips = function()
                 name = shipName,
                 pos = attUtil.position,
                 quat = attUtil.quat,
+                preQuat = attUtil.preQuat,
                 velocity = attUtil.velocity,
                 size = attUtil.size,
                 code = v.code
@@ -3612,7 +3766,7 @@ end
 local runFlight = function()
     sleep(0.1)
     if physics_flag then
-        pdControl.basicYSpeed = 29.5
+        pdControl.basicYSpeed = 29.5 + properties.integral
         pdControl.helicopt_P_multiply = 1.5
         pdControl.helicopt_D_multiply = 4
         pdControl.rot_P_multiply = 1.5
@@ -3621,6 +3775,7 @@ local runFlight = function()
         pdControl.move_D_multiply = 100
         pdControl.airMass_multiply = 20
     else
+        pdControl.basicYSpeed = 10 + properties.integral
         return
     end
 
