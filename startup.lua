@@ -94,6 +94,7 @@ system.reset = function()
         profileIndex = "joyStick",
         raderRange = 1,
         integral = 0,
+        coupled = true,
         profile = {
             keyboard = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
@@ -819,6 +820,7 @@ joyUtil.getJoyInput = function()
             joyUtil.left = joyUtil.joy.getButton(15)
             joyUtil.right = joyUtil.joy.getButton(13)
             joyUtil.LeftJoyClick = joyUtil.joy.getButton(10)
+            joyUtil.RightJoyClick = joyUtil.joy.getButton(11)
         else
             joyUtil.defaultOutput()
         end
@@ -840,10 +842,12 @@ joyUtil.getJoyInput = function()
                 end
                 attUtil.setLastPos()
                 properties.mode = index
-                joyUtil.cd = 4
             elseif joyUtil.right or joyUtil.left then
-                joyUtil.cd = 4
+            elseif joyUtil.RightJoyClick then
+                properties.coupled = not properties.coupled
             end
+            
+            joyUtil.cd = 4
         end
         joyUtil.cd = joyUtil.cd > 0 and joyUtil.cd - 1 or 0
     else
@@ -857,6 +861,7 @@ joyUtil.defaultOutput = function()
     joyUtil.RightStick.x = 0
     joyUtil.RightStick.y = 0
     joyUtil.LeftJoyClick = false
+    joyUtil.RightJoyClick = false
     joyUtil.LB = 0
     joyUtil.RB = 0
     joyUtil.LT = 0
@@ -901,11 +906,19 @@ pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
 end
 
 pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
+    if properties.mode == 1 and not properties.coupled then
+        d = 0.15 * pdControl.move_D_multiply
+    else
+        d = d * pdControl.move_D_multiply
+    end
     p = p * pdControl.move_P_multiply
-    d = d * pdControl.move_D_multiply
     pdControl.xSpeed = -attUtil.velocity.x * d
     pdControl.zSpeed = -attUtil.velocity.z * d
-    pdControl.ySpeed = pdControl.basicYSpeed + -attUtil.velocity.y * d
+    if properties.mode == 1 and not properties.coupled then
+        pdControl.ySpeed = -attUtil.velocity.y * d
+    else
+        pdControl.ySpeed = pdControl.basicYSpeed + -attUtil.velocity.y * d
+    end
 
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
@@ -1720,9 +1733,18 @@ function attPage:refresh()
 
             self.window.setCursorPos(x - #mod / 2 + 2, yPos + 1)
             self.window.blit(mod, genStr(title, #mod), genStr(bg, #mod))
-            if mod == "spaceShip" and joyUtil.LeftJoyClick then
-                self.window.setCursorPos(x - 3, y)
-                self.window.blit("!BURNING!", "fffffffff", "eeeeeeeee")
+            if mod == "spaceShip" then
+                if joyUtil.LeftJoyClick then
+                    self.window.setCursorPos(x - 3, y)
+                    self.window.blit("!BURNING!", "fffffffff", "eeeeeeeee")
+                else
+                    self.window.setCursorPos(x - 2, y - 1)
+                    if properties.coupled then
+                        self.window.blit("Coupled", genStr(bg, 7), genStr(select, 7))
+                    else
+                        self.window.blit("Coupled", genStr(font, 7), genStr(bg, 7))
+                    end
+                end
             else
                 self.window.setCursorPos(x - 3, y - 1)
                 self.window.blit(("ROLL %6.1f"):format(attUtil.eulerAngle.roll), genStr(other, 11), genStr(bg, 11))
@@ -1762,6 +1784,24 @@ function attPage:refresh()
                     self.window.blit("^", bg, font)
                 end
             end
+        else
+            if mod == "spaceShip" then
+                self.window.setCursorPos(8, 5)
+                if properties.coupled then
+                    self.window.blit("C", bg, select)
+                else
+                    self.window.blit("C", font, bg)
+                end
+            end
+        end
+    else
+        if mod == "spaceShip" then
+            self.window.setCursorPos(8, 5)
+            if properties.coupled then
+                self.window.blit("C", bg, select)
+            else
+                self.window.blit("C", font, bg)
+            end
         end
     end
 end
@@ -1780,27 +1820,46 @@ function attPage:onTouch(x, y)
         width, height, xPos, yPos = self.width, self.height, 1, 1
     end
     local mod = modelist[properties.mode].name
-    local bx, by = width / 2 - xPos - 2, height / 2 - yPos + 2
-    if yPos > 1 then y = y - 1 end
-    if y == by and x >= bx and x <= bx + 8 then
-        local index
+    if info ~= -1 then
+        if info.maxColumn > 1 then
+            local bx, by = width / 2 - xPos, height / 2 - yPos
+            if yPos > 1 then y = y - 1 end
+            if y == by + 2 and x >= bx - 2 and x <= bx + 10 then
+                local index
+                if mod == "spaceShip" then
+                    index = 6
+                elseif mod == "quadFPV" then
+                    index = 7
+                elseif mod == "helicopter" then
+                    index = 8
+                elseif mod == "airShip" then
+                    index = 9
+                end
+                if index then
+                    self.windows[self.row][self.column][index].indexFlag = 2
+                    properties.winIndex[self.name][self.row][self.column] = index
+                end
+            elseif y == by + 3 and x >= bx - 2 and x <= bx + 10 then
+                attUtil.setLastPos()
+                properties.lock = not properties.lock
+            elseif y == by - 1 and x >= bx - 2 and x <= bx + 9 then
+                properties.coupled = not properties.coupled
+            end
+        else
+            if mod == "spaceShip" then
+                if y==5 and x == 8 then
+                    properties.coupled = not properties.coupled
+                end
+            end
+        end
+    else
         if mod == "spaceShip" then
-            index = 6
-        elseif mod == "quadFPV" then
-            index = 7
-        elseif mod == "helicopter" then
-            index = 8
-        elseif mod == "airShip" then
-            index = 9
+            if y==5 and x == 8 then
+                properties.coupled = not properties.coupled
+            end
         end
-        if index then
-            self.windows[self.row][self.column][index].indexFlag = 2
-            properties.winIndex[self.name][self.row][self.column] = index
-        end
-    elseif y == by + 1 and x >= bx and x <= bx + 8 then
-        attUtil.setLastPos()
-        properties.lock = not properties.lock
     end
+    
 end
 
 --winIndex = 3
@@ -2496,8 +2555,8 @@ end
 function set_spaceShip:onTouch(x, y)
     self:subPage_Back(x, y)
     if y == 2 then
-        self.windows[self.row][self.column][13].indexFlag = 5
-        properties.winIndex[self.name][self.row][self.column] = 13
+        self.windows[self.row][self.column][14].indexFlag = 6
+        properties.winIndex[self.name][self.row][self.column] = 14
     end
     if x > 2 and y > 2 then
         local profile = properties.profile[properties.profileIndex]
@@ -2571,8 +2630,8 @@ end
 function set_quadFPV:onTouch(x, y)
     self:subPage_Back(x, y)
     if y == 2 then
-        self.windows[self.row][self.column][13].indexFlag = 6
-        properties.winIndex[self.name][self.row][self.column] = 13
+        self.windows[self.row][self.column][14].indexFlag = 7
+        properties.winIndex[self.name][self.row][self.column] = 14
     end
     if x > 2 and y > 2 then
         local profile = properties.profile[properties.profileIndex]
@@ -2653,8 +2712,8 @@ end
 function set_helicopter:onTouch(x, y)
     self:subPage_Back(x, y)
     if y == 2 then
-        self.windows[self.row][self.column][13].indexFlag = 7
-        properties.winIndex[self.name][self.row][self.column] = 13
+        self.windows[self.row][self.column][14].indexFlag = 8
+        properties.winIndex[self.name][self.row][self.column] = 14
     end
     if x > 2 and y > 2 then
         local profile = properties.profile[properties.profileIndex]
@@ -2719,8 +2778,8 @@ end
 function set_airShip:onTouch(x, y)
     self:subPage_Back(x, y)
     if y == 2 then
-        self.windows[self.row][self.column][13].indexFlag = 8
-        properties.winIndex[self.name][self.row][self.column] = 13
+        self.windows[self.row][self.column][14].indexFlag = 9
+        properties.winIndex[self.name][self.row][self.column] = 14
     end
     if x > 2 and y > 2 then
         local profile = properties.profile[properties.profileIndex]
@@ -2848,10 +2907,10 @@ function set_att:init()
     self.indexFlag = 5
     self.buttons = {
         { text = "<", x = 1,                  y = 1,                   blitF = title, blitB = bg },
-        { text = "w", x = self.width / 2 - 5, y = self.height / 2,     blitF = font,  blitB = bg },
-        { text = "n", x = self.width / 2,     y = self.height / 2 - 3, blitF = font,  blitB = bg },
-        { text = "e", x = self.width / 2 + 5, y = self.height / 2,     blitF = font,  blitB = bg },
-        { text = "s", x = self.width / 2,     y = self.height / 2 + 3, blitF = font,  blitB = bg }
+        { text = "w", x = math.floor(self.width / 2) - 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
+        { text = "n", x = math.floor(self.width / 2),     y = math.floor(self.height / 2) - 3, blitF = font,  blitB = bg },
+        { text = "e", x = math.floor(self.width / 2) + 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
+        { text = "s", x = math.floor(self.width / 2),     y = math.floor(self.height / 2) + 3, blitF = font,  blitB = bg }
     }
 end
 
