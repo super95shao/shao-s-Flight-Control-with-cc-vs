@@ -846,7 +846,7 @@ joyUtil.getJoyInput = function()
             elseif joyUtil.RightJoyClick then
                 properties.coupled = not properties.coupled
             end
-            
+
             joyUtil.cd = 4
         end
         joyUtil.cd = joyUtil.cd > 0 and joyUtil.cd - 1 or 0
@@ -927,11 +927,11 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
     if sidemove_p then
         sidemove_p = sidemove_p * pdControl.move_P_multiply
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
-        yVal * p * attUtil.mass ,
+            yVal * p * attUtil.mass,
             zVal * sidemove_p * attUtil.mass)
     else
         ship.applyRotDependentForce(xVal * p * attUtil.mass,
-        yVal * p * attUtil.mass,
+            yVal * p * attUtil.mass,
             zVal * p * attUtil.mass)
     end
 end
@@ -958,12 +958,12 @@ pdControl.quadUp = function(yVal, p, d, hov)
 
     if yVal == 0 and properties.mode ~= 3 then
         ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
-        pdControl.ySpeed * attUtil.mass + properties.gravity * pdControl.basicYSpeed * attUtil.mass,
-        pdControl.zSpeed * attUtil.mass)
+            pdControl.ySpeed * attUtil.mass + properties.gravity * pdControl.basicYSpeed * attUtil.mass,
+            pdControl.zSpeed * attUtil.mass)
     else
         ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
-        pdControl.ySpeed * attUtil.mass,
-        pdControl.zSpeed * attUtil.mass)
+            pdControl.ySpeed * attUtil.mass,
+            pdControl.zSpeed * attUtil.mass)
     end
 end
 
@@ -973,9 +973,9 @@ pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     xRot                 = resetAngelRange(xRot)
     yRot                 = resetAngelRange(yRot)
     zRot                 = resetAngelRange(zRot)
-    pdControl.pitchSpeed = (attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
-    pdControl.rollSpeed  = (attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
-    pdControl.yawSpeed   = (attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
+    pdControl.pitchSpeed = resetAngelRange(attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
+    pdControl.rollSpeed  = resetAngelRange(attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
+    pdControl.yawSpeed   = resetAngelRange(attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
     ship.applyRotDependentTorque(
         pdControl.rollSpeed * attUtil.MomentOfInertiaTensor,
         pdControl.yawSpeed * attUtil.MomentOfInertiaTensor,
@@ -1295,7 +1295,7 @@ pdControl.pointLoop = function()
         tgAg, pos)
 end
 
-local cameraQuat = { w = -1, x = 0, y = 0, z = 0 }
+local cameraQuat = { w = 1, x = 0, y = 0, z = 0 }
 local xOffset = 0
 pdControl.ShipCamera = function()
     if parentShip.id ~= -1 then
@@ -1305,10 +1305,11 @@ pdControl.ShipCamera = function()
         local maxSize = math.max(parentShip.size.x, parentShip.size.z)
         maxSize = math.max(maxSize, parentShip.size.y)
         local range = { x = -maxSize - xOffset, y = 0, z = 0 }
-        local pos = parentShip.pos
-        pos.x = pos.x + parentShip.velocity.x
-        pos.y = pos.y + parentShip.velocity.y
-        pos.z = pos.z + parentShip.velocity.z
+        local pos = {}
+        
+        pos.x = parentShip.pos.x + parentShip.velocity.x
+        pos.y = parentShip.pos.y + parentShip.velocity.y
+        pos.z = parentShip.pos.z + parentShip.velocity.z
         local speedMult = xOffset * 2
         speedMult = speedMult < 16 and 16 or speedMult
         local myRot = euler2Quat(
@@ -1786,22 +1787,32 @@ function attPage:refresh()
             end
         else
             if mod == "spaceShip" then
-                self.window.setCursorPos(8, 5)
+                self.window.setCursorPos(math.floor(self.width / 2) + 1, math.floor(self.height / 2))
                 if properties.coupled then
                     self.window.blit("C", bg, select)
                 else
                     self.window.blit("C", font, bg)
                 end
+                self.window.setCursorPos(math.floor(self.width / 2), math.floor(self.height / 2) + 2)
+                local str = string.format("%3d", attUtil.speed)
+                self.window.blit(str, genStr(font, 3), genStr(bg, 3))
+                self.window.setCursorPos(math.floor(self.width / 2), math.floor(self.height / 2) + 3)
+                self.window.blit("m/s", genStr(other, 3), genStr(bg, 3))
             end
         end
     else
         if mod == "spaceShip" then
-            self.window.setCursorPos(8, 5)
+            self.window.setCursorPos(math.floor(self.width / 2) + 1, math.floor(self.height / 2))
             if properties.coupled then
                 self.window.blit("C", bg, select)
             else
                 self.window.blit("C", font, bg)
             end
+            local str = string.format("%3d", attUtil.speed)
+            self.window.setCursorPos(math.floor(self.width / 2), math.floor(self.height / 2) + 2)
+            self.window.blit(str, genStr(font, 3), genStr(bg, 3))
+            self.window.setCursorPos(math.floor(self.width / 2), math.floor(self.height / 2) + 3)
+            self.window.blit("m/s", genStr(other, 3), genStr(bg, 3))
         end
     end
 end
@@ -1847,19 +1858,18 @@ function attPage:onTouch(x, y)
             end
         else
             if mod == "spaceShip" then
-                if y==5 and x == 8 then
+                if y == math.floor(self.height / 2) and x == math.floor(self.width / 2) + 1 then
                     properties.coupled = not properties.coupled
                 end
             end
         end
     else
         if mod == "spaceShip" then
-            if y==5 and x == 8 then
+            if y == math.floor(self.height / 2) and x == math.floor(self.width / 2) + 1 then
                 properties.coupled = not properties.coupled
             end
         end
     end
-    
 end
 
 --winIndex = 3
@@ -2906,7 +2916,7 @@ function set_att:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
     self.indexFlag = 5
     self.buttons = {
-        { text = "<", x = 1,                  y = 1,                   blitF = title, blitB = bg },
+        { text = "<", x = 1,                              y = 1,                               blitF = title, blitB = bg },
         { text = "w", x = math.floor(self.width / 2) - 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
         { text = "n", x = math.floor(self.width / 2),     y = math.floor(self.height / 2) - 3, blitF = font,  blitB = bg },
         { text = "e", x = math.floor(self.width / 2) + 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
@@ -3551,7 +3561,7 @@ function monitorUtil.getMonitorSort(name)
 end
 
 ---------broadcast---------
-beat_ct, call_ct, captcha, calling = 2, 0, genCaptcha(), -1
+beat_ct, call_ct, captcha, calling = 3, 0, genCaptcha(), -1
 local shipNet_beat = function() --广播
     while true do
         if not shutdown_flag then
@@ -3759,9 +3769,9 @@ function flightUpdate()
     elseif properties.mode == 9 then
         pdControl.ShipCamera()
     elseif properties.mode == 10 then
-        commands.execAsync("say 10")
+        --commands.execAsync("say 10")
     elseif properties.mode == 11 then
-        commands.execAsync("say 11")
+        --commands.execAsync("say 11")
     end
 end
 
@@ -3792,13 +3802,13 @@ local listener = function()
         local eventData = { os.pullEvent() }
         local event = eventData[1]
 
-        if event == "physics_tick" then
+        --[[ if event == "physics_tick" then
             if physics_flag then
                 physics_flag = false
             end
             --commands.execAsync(("say phy"))
             testRun(eventData[2])
-        end
+        end ]]
 
         if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
             if shutdown_flag then
