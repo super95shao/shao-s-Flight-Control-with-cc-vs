@@ -2823,11 +2823,14 @@ function set_user:init()
 end
 
 function set_user:refresh()
+    if properties.mode ~= 5 and properties.mode ~= 6 then
+        scanner.scan()
+    end
+    scanner.scanPlayer()
     self:refreshButtons()
     self:refreshTitle()
     local bg, font, select = properties.bg, properties.font, properties.select
     for i = 1, 7, 1 do
-        if properties.mode ~= 4 and properties.mode ~= 5 then scanner.scanPlayer() end
         if scanner.playerList[i] then
             local name = scanner.playerList[i].name
             self.window.setCursorPos(2, 2 + i)
@@ -3759,8 +3762,10 @@ function flightUpdate()
     elseif properties.mode == 4 then
         pdControl.airShip()
     elseif properties.mode == 5 then
+        scanner.scan()
         pdControl.followMouse()
     elseif properties.mode == 6 then
+        scanner.scan()
         pdControl.follow(scanner.commander)
     elseif properties.mode == 7 then
         pdControl.goHome()
@@ -3852,7 +3857,6 @@ local runFlight = function()
         if shutdown_flag then
             sleep(0.5)
         else
-            scanner.scan()
             attUtil.getAttWithCCTick()
             joyUtil.getJoyInput()
             flightUpdate()
