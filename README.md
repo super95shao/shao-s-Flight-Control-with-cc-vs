@@ -5,6 +5,9 @@
 ### 所以这版通用飞控便诞生了，它使用cc:vs的扩展API作为动力源，可以实现开箱即用，一键部署，十分的方便。
 ### 我的目标是使它可以模拟出各种类型的飞行器的操作手感，并具备自动驾驶、寻路、避障等基本功能。
 
+### 完整功能需要安装Kallen的MetaPhysics的扫描器API（follow模式、hms_fly模式、切换玩家名等功能需要）
+### https://github.com/KallenKas024/Metaphysics/
+
 > 特别感谢：
 @kallen 提供的metaphysics mod ： 飞控的玩家扫描器、射线检测（方块扫描器）使用了此mod提供的API
 感谢 @kallen 因我的需求增加mod功能
