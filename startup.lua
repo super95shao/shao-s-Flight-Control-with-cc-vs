@@ -64,10 +64,10 @@ system.init = function()
 
         if not type(properties.mode) == "number" then properties.mode = 1 end
 
-        if properties.profile.keyboard.spaceShip_D > 3.52 then properties.profile.keyboard.spaceShip_D = 3.52 end
-        if properties.profile.keyboard.quad_D > 3.52 then properties.profile.keyboard.quad_D = 3.52 end
-        if properties.profile.joyStick.spaceShip_D > 3.52 then properties.profile.joyStick.spaceShip_D = 3.52 end
-        if properties.profile.joyStick.quad_D > 3.52 then properties.profile.joyStick.quad_D = 3.52 end
+        if properties.profile.keyboard.spaceShip_D > 2.52 then properties.profile.keyboard.spaceShip_D = 2.52 end
+        if properties.profile.keyboard.quad_D > 2.52 then properties.profile.keyboard.quad_D = 2.52 end
+        if properties.profile.joyStick.spaceShip_D > 2.52 then properties.profile.joyStick.spaceShip_D = 2.52 end
+        if properties.profile.joyStick.quad_D > 2.52 then properties.profile.joyStick.quad_D = 2.52 end
 
         system.file:close()
     else
@@ -98,13 +98,13 @@ system.reset = function()
         profile = {
             keyboard = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 3.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_D = 2.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 2,      --星舰模式油门速度
                 spaceShip_SideMove = 2, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
                 spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 quad_P = 1,
-                quad_D = 3.52,
+                quad_D = 2.52,
                 quad_Acc = 1, --四轴FPV模式油门强度
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
@@ -120,13 +120,13 @@ system.reset = function()
             },
             joyStick = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 3.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_D = 2.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 2,      --星舰模式油门速度
                 spaceShip_SideMove = 2, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
                 spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 quad_P = 1,
-                quad_D = 3.52,
+                quad_D = 2.52,
                 quad_Acc = 1, --四轴FPV模式油门强度
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
@@ -143,7 +143,7 @@ system.reset = function()
         },
         lock = false,
         zeroPoint = 0,
-        gravity = -1,
+        gravity = -2,
         airMass = 1, --空气密度 (风阻)
         rayCasterRange = 128,
         shipFace = "west",
