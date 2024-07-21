@@ -65,9 +65,7 @@ system.init = function()
         if not type(properties.mode) == "number" then properties.mode = 1 end
 
         if properties.profile.keyboard.spaceShip_D > 2.52 then properties.profile.keyboard.spaceShip_D = 2.52 end
-        if properties.profile.keyboard.quad_D > 2.52 then properties.profile.keyboard.quad_D = 2.52 end
         if properties.profile.joyStick.spaceShip_D > 2.52 then properties.profile.joyStick.spaceShip_D = 2.52 end
-        if properties.profile.joyStick.quad_D > 2.52 then properties.profile.joyStick.quad_D = 2.52 end
 
         system.file:close()
     else
@@ -93,19 +91,27 @@ system.reset = function()
         winIndex = {},
         profileIndex = "joyStick",
         raderRange = 1,
-        integral = 0,
         coupled = true,
         profile = {
             keyboard = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 2.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_D = 2.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 2,      --星舰模式油门速度
                 spaceShip_SideMove = 2, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
                 spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
-                quad_P = 1,
-                quad_D = 2.52,
-                quad_Acc = 1, --四轴FPV模式油门强度
+                roll_rc_rate = 1.0,
+                roll_s_rate = 0.7,
+                roll_expo = 0.3,
+                yaw_rc_rate = 1.0,
+                yaw_s_rate = 0.7,
+                yaw_expo = 0.3,
+                pitch_rc_rate = 1.0,
+                pitch_s_rate = 0.7,
+                pitch_expo = 0.3,
+                max_throttle = 1.0,
+                throttle_mid = 0.25,
+                throttle_expo = 1.0,
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
                 helicopt_ROT_D = 0.75,
@@ -120,14 +126,23 @@ system.reset = function()
             },
             joyStick = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 2.52,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_D = 2.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 2,      --星舰模式油门速度
                 spaceShip_SideMove = 2, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
                 spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
-                quad_P = 1,
-                quad_D = 2.52,
-                quad_Acc = 1, --四轴FPV模式油门强度
+                roll_rc_rate = 1.0,
+                roll_s_rate = 0.7,
+                roll_expo = 0.3,
+                yaw_rc_rate = 1.0,
+                yaw_s_rate = 0.7,
+                yaw_expo = 0.3,
+                pitch_rc_rate = 1.0,
+                pitch_s_rate = 0.7,
+                pitch_expo = 0.3,
+                max_throttle = 1.0,
+                throttle_mid = 0.25,
+                throttle_expo = 1.0,
                 helicopt_YAW_P = 0.75,
                 helicopt_ROT_P = 0.75,
                 helicopt_ROT_D = 0.75,
@@ -172,74 +187,6 @@ system.write = function(file, obj)
 end
 
 -----------function------------
-function tableHasValue(targetTable, targetValue)
-    for index, value in ipairs(targetTable) do
-        if index ~= 'metatable' and value == targetValue then
-            return true
-        end
-    end
-    return false
-end
-
-local function joinArrayTables(...)
-    local entries = {}
-    for i = 1, select('#', ...) do
-        local t = select(i, ...)
-        for _, v in ipairs(t) do
-            table.insert(entries, v)
-        end
-    end
-    return entries
-end
-
-local function arrayTableDuplicate(targetTable)
-    local entries = {}
-    local seenValues = {}
-    for i, v in ipairs(targetTable) do
-        if not seenValues[v] then
-            seenValues[v] = true
-            table.insert(entries, v)
-        end
-    end
-    return entries
-end
-
-local function arrayTableRemoveElement(targetTable, value)
-    for i, v in ipairs(targetTable) do
-        if v == value then
-            table.remove(targetTable, i)
-            return
-        end
-    end
-end
-
-local MatrixMultiplication = function(m, v)
-    return {
-        x = m[1][1] * v.x + m[1][2] * v.y,
-        y = m[2][1] * v.x + m[2][2] * v.y
-    }
-end
-
-local create_from_axis_angle = function(xx, yy, zz, a)
-    local q = {}
-    local factor = math.sin(a / 2.0)
-    q.x = xx * factor
-    q.y = yy * factor
-    q.z = zz * factor
-    q.w = math.cos(a / 2.0)
-
-    return q
-end
-
-local getConjQuat = function(q)
-    return {
-        w = q.w,
-        x = -q.x,
-        y = -q.y,
-        z = -q.z,
-    }
-end
-
 function quatMultiply(q1, q2)
     local newQuat = {}
     newQuat.w = -q1.x * q2.x - q1.y * q2.y - q1.z * q2.z + q1.w * q2.w
@@ -247,55 +194,6 @@ function quatMultiply(q1, q2)
     newQuat.y = -q1.x * q2.z + q1.y * q2.w + q1.z * q2.x + q1.w * q2.y
     newQuat.z = q1.x * q2.y - q1.y * q2.x + q1.z * q2.w + q1.w * q2.z
     return newQuat
-end
-
-function copysign(num1, num2)
-    num1 = math.abs(num1)
-    num1 = num2 > 0 and num1 or -num1
-    return num1
-end
-
-function contrarysign(num1, num2)
-    if ((num1 > 0 and num2 < 0) or (num1 < 0 and num2 > 0)) then
-        return true
-    else
-        return false
-    end
-end
-
-function formatN(val, n)
-    n = math.pow(10, n or 1)
-    val = tonumber(val)
-    return math.floor(val * n) / n
-end
-
-function resetAngelRange(angle)
-    if (math.abs(angle) > 180) then
-        angle = math.abs(angle) >= 360 and angle % 360 or angle
-        return -copysign(360 - math.abs(angle), angle)
-    else
-        return angle
-    end
-end
-
-function resetAngelRangeRad(angle)
-    return math.rad(resetAngelRange(math.deg(angle)))
-end
-
-local genCaptcha = function(len)
-    local length = len and len or 5
-    local result = ""
-    for i = 1, length, 1 do
-        local num = math.random(0, 2)
-        if num == 0 then
-            result = result .. string.char(math.random(65, 90))
-        elseif num == 1 then
-            result = result .. string.char(math.random(97, 122))
-        else
-            result = result .. string.char(math.random(48, 57))
-        end
-    end
-    return result
 end
 
 function RotateVectorByQuat(quat, v)
@@ -411,21 +309,151 @@ function quat2Axis(q)
     return result
 end
 
-function genParticle(x, y, z)
-    commands.execAsync(string.format("particle electric_spark %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+local MatrixMultiplication = function(m, v)
+    return {
+        x = m[1][1] * v.x + m[1][2] * v.y,
+        y = m[2][1] * v.x + m[2][2] * v.y
+    }
 end
 
-function genShootParticle(x, y, z)
-    commands.execAsync(string.format("particle sonic_boom %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+local create_from_axis_angle = function(xx, yy, zz, a)
+    local q = {}
+    local factor = math.sin(a / 2.0)
+    q.x = xx * factor
+    q.y = yy * factor
+    q.z = zz * factor
+    q.w = math.cos(a / 2.0)
+
+    return q
 end
 
-function genParticleBomm(x, y, z)
-    commands.execAsync(string.format("summon creeper %0.6f %0.6f %0.6f {ExplosionRadius:6,Fuse:0}", x, y, z))
+local getConjQuat = function(q)
+    return {
+        w = q.w,
+        x = -q.x,
+        y = -q.y,
+        z = -q.z,
+    }
 end
 
-function playFpvFanSound(x, y, z, pitch)
-    commands.execAsync(string.format("playsound entity.bee.loop neutral @e[type=minecraft:player] %d %d %d 2 %0.4f 0.5",
-        x, y, z, pitch))
+local getRate = function(rc, s, exp, x)
+    if s >= 1 then
+        s = 0.99
+    end
+    local flag = x < 0 and true or false
+    x = math.abs(x)
+    local p = 1 / (1 - (x * s))
+    local q = (math.pow(x, 4) * exp) + x * (1 - exp)
+    local r = 200 * q * rc
+    local t = r * p
+    return flag and -t or t
+end
+
+local getThrottle = function(mid, t_exp, x)
+    x = x > 1 and 1 or x
+    local flag = x < 0 and true or false
+    x = math.abs(x)
+    local result = 0
+    if x < mid then
+        x = 1 - (x / mid)
+        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
+        result = mid - result * mid
+    else
+        x = (x - mid) / (1 - mid)
+        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
+        result = mid + result * (1 - mid)
+    end
+    return flag and -result or result
+end
+
+function tableHasValue(targetTable, targetValue)
+    for index, value in ipairs(targetTable) do
+        if index ~= 'metatable' and value == targetValue then
+            return true
+        end
+    end
+    return false
+end
+
+local function joinArrayTables(...)
+    local entries = {}
+    for i = 1, select('#', ...) do
+        local t = select(i, ...)
+        for _, v in ipairs(t) do
+            table.insert(entries, v)
+        end
+    end
+    return entries
+end
+
+local function arrayTableDuplicate(targetTable)
+    local entries = {}
+    local seenValues = {}
+    for i, v in ipairs(targetTable) do
+        if not seenValues[v] then
+            seenValues[v] = true
+            table.insert(entries, v)
+        end
+    end
+    return entries
+end
+
+local function arrayTableRemoveElement(targetTable, value)
+    for i, v in ipairs(targetTable) do
+        if v == value then
+            table.remove(targetTable, i)
+            return
+        end
+    end
+end
+
+function copysign(num1, num2)
+    num1 = math.abs(num1)
+    num1 = num2 > 0 and num1 or -num1
+    return num1
+end
+
+function contrarysign(num1, num2)
+    if ((num1 > 0 and num2 < 0) or (num1 < 0 and num2 > 0)) then
+        return true
+    else
+        return false
+    end
+end
+
+function formatN(val, n)
+    n = math.pow(10, n or 1)
+    val = tonumber(val)
+    return math.floor(val * n) / n
+end
+
+function resetAngelRange(angle)
+    if (math.abs(angle) > 180) then
+        angle = math.abs(angle) >= 360 and angle % 360 or angle
+        return -copysign(360 - math.abs(angle), angle)
+    else
+        return angle
+    end
+end
+
+function resetAngelRangeRad(angle)
+    return math.rad(resetAngelRange(math.deg(angle)))
+end
+
+local genCaptcha = function(len)
+    local length = len and len or 5
+    local result = ""
+    for i = 1, length, 1 do
+        local num = math.random(0, 2)
+        if num == 0 then
+            result = result .. string.char(math.random(65, 90))
+        elseif num == 1 then
+            result = result .. string.char(math.random(97, 122))
+        else
+            result = result .. string.char(math.random(48, 57))
+        end
+    end
+    return result
 end
 
 function table.contains(table, element)
@@ -479,6 +507,23 @@ function getColorDec(paint)
         result = 2 ^ (paint - 48)
     end
     return result
+end
+
+function genParticle(x, y, z)
+    commands.execAsync(string.format("particle electric_spark %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+end
+
+function genShootParticle(x, y, z)
+    commands.execAsync(string.format("particle sonic_boom %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+end
+
+function genParticleBomm(x, y, z)
+    commands.execAsync(string.format("summon creeper %0.6f %0.6f %0.6f {ExplosionRadius:6,Fuse:0}", x, y, z))
+end
+
+function playFpvFanSound(x, y, z, pitch)
+    commands.execAsync(string.format("playsound entity.bee.loop neutral @e[type=minecraft:player] %d %d %d 2 %0.4f 0.5",
+        x, y, z, pitch))
 end
 
 -----------rayCaster-----------
@@ -724,9 +769,9 @@ attUtil.getOmega = function(xp, yp, zp)
     attUtil.preQuat.z = -attUtil.preQuat.z
     XPoint = RotateVectorByQuat(attUtil.preQuat, XPoint)
     ZPoint = RotateVectorByQuat(attUtil.preQuat, ZPoint)
-    attUtil.omega.roll = math.deg(math.asin(ZPoint.y))
-    attUtil.omega.pitch = math.deg(math.asin(XPoint.y))
-    attUtil.omega.yaw = math.deg(math.atan2(-XPoint.z, XPoint.x))
+    attUtil.omega.x = math.deg(math.asin(ZPoint.y))
+    attUtil.omega.z = math.deg(math.asin(XPoint.y))
+    attUtil.omega.y = math.deg(math.atan2(-XPoint.z, XPoint.x))
 end
 
 attUtil.setPreAtt = function()
@@ -890,7 +935,8 @@ pdControl = {
     rot_D_multiply = 1,
     move_P_multiply = 1,
     move_D_multiply = 100,
-    airMass_multiply = 10
+    airMass_multiply = 5,
+    tmpp = 1 / (math.pi / 2)
 }
 
 pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
@@ -899,7 +945,6 @@ pdControl.moveWithOutRot = function(xVal, yVal, zVal, p, d)
     pdControl.xSpeed = xVal * p + -attUtil.velocity.x * d
     pdControl.zSpeed = zVal * p + -attUtil.velocity.z * d
     pdControl.ySpeed = yVal * p + pdControl.basicYSpeed + -attUtil.velocity.y * d
-
     ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
         pdControl.ySpeed * attUtil.mass,
         pdControl.zSpeed * attUtil.mass)
@@ -942,7 +987,7 @@ pdControl.quadUp = function(yVal, p, d, hov)
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
         pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p +
-            pdControl.basicYSpeed + -omegaApplyRot.y * d
+            pdControl.basicYSpeed * (-properties.gravity + 1) + -omegaApplyRot.y * d
     else
         pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p
     end
@@ -956,7 +1001,7 @@ pdControl.quadUp = function(yVal, p, d, hov)
     pdControl.ySpeed = copysign((attUtil.velocity.y ^ 2) * pdControl.airMass_multiply * properties.airMass,
         -attUtil.velocity.y)
 
-    if yVal == 0 and properties.mode ~= 3 then
+    if properties.mode ~= 3 then
         ship.applyInvariantForce(pdControl.xSpeed * attUtil.mass,
             pdControl.ySpeed * attUtil.mass + properties.gravity * pdControl.basicYSpeed * attUtil.mass,
             pdControl.zSpeed * attUtil.mass)
@@ -973,9 +1018,9 @@ pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     xRot                 = resetAngelRange(xRot)
     yRot                 = resetAngelRange(yRot)
     zRot                 = resetAngelRange(zRot)
-    pdControl.pitchSpeed = resetAngelRange(attUtil.omega.pitch + zRot) * p + -attUtil.omega.pitch * 7 * d
-    pdControl.rollSpeed  = resetAngelRange(attUtil.omega.roll + xRot) * p + -attUtil.omega.roll * 7 * d
-    pdControl.yawSpeed   = resetAngelRange(attUtil.omega.yaw + yRot) * p + -attUtil.omega.yaw * 7 * d
+    pdControl.pitchSpeed = resetAngelRange(attUtil.omega.z + zRot) * p + -attUtil.omega.z * 7 * d
+    pdControl.rollSpeed  = resetAngelRange(attUtil.omega.x + xRot) * p + -attUtil.omega.x * 7 * d
+    pdControl.yawSpeed   = resetAngelRange(attUtil.omega.y + yRot) * p + -attUtil.omega.y * 7 * d
     ship.applyRotDependentTorque(
         pdControl.rollSpeed * attUtil.MomentOfInertiaTensor,
         pdControl.yawSpeed * attUtil.MomentOfInertiaTensor,
@@ -1052,8 +1097,6 @@ pdControl.spaceShip = function()
         if joyUtil.LeftJoyClick then
             local p = properties.profile[properties.profileIndex].spaceShip_Burner
             forward, up, sideMove = forward * p, up * p, sideMove * p
-            --p = p / 2
-            --xRot, yRot, zRot = xRot * p, yRot * p, zRot * p
         end
         pdControl.moveWithRot(forward, up, sideMove,
             properties.profile[properties.profileIndex].spaceShip_Acc,
@@ -1066,18 +1109,29 @@ pdControl.spaceShip = function()
     end
 end
 
+pdControl.quatRot = function(xRot, yRot, zRot)
+    pdControl.xSpeed = (attUtil.omega.x + xRot) * 0.3456 + -attUtil.omega.x * 7.25
+    pdControl.ySpeed = (attUtil.omega.y + yRot) * 0.3456 + -attUtil.omega.y * 7.25
+    pdControl.zSpeed = (attUtil.omega.z + zRot) * 0.3456 + -attUtil.omega.z * 7.25
+    ship.applyRotDependentTorque(
+        pdControl.xSpeed * attUtil.MomentOfInertiaTensor,
+        pdControl.ySpeed * attUtil.MomentOfInertiaTensor,
+        pdControl.zSpeed * attUtil.MomentOfInertiaTensor)
+end
+
 pdControl.quadFPV = function()
+    local prf = properties.profile[properties.profileIndex]
     if properties.lock then
         if joyUtil.LeftStick.y == 0 then
             pdControl.quadUp(
                 0,
-                properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+                properties.profile[properties.profileIndex].max_throttle / pdControl.rot_D_multiply,
                 3,
                 true)
         else
             pdControl.quadUp(
                 math.deg(math.asin(joyUtil.LeftStick.y)),
-                properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+                properties.profile[properties.profileIndex].max_throttle / pdControl.rot_D_multiply,
                 3,
                 false)
         end
@@ -1102,25 +1156,28 @@ pdControl.quadFPV = function()
             pdControl.rotate2Euler2(euler, 1, 2.6)
         else
             pdControl.rotate2Euler2({
-                    roll = math.deg(math.asin(joyUtil.RightStick.x)) / 1.5,
+                    roll = math.deg(math.asin(joyUtil.RightStick.x)) / 3,
                     yaw = attUtil.eulerAngle.yaw + joyUtil.LeftStick.x * 20 / pdControl.rot_D_multiply,
-                    pitch = math.deg(math.asin(joyUtil.RightStick.y) / 1.5)
+                    pitch = math.deg(math.asin(joyUtil.RightStick.y) / 3)
                 },
-                properties.profile[properties.profileIndex].quad_P,
-                2.6)
+                1,
+                2)
         end
     else
+        local throttle = math.asin(joyUtil.LeftStick.y) * pdControl.tmpp
+        throttle = getThrottle(prf.throttle_mid, prf.throttle_expo, throttle) * 2 * prf.max_throttle
         pdControl.quadUp(
-            math.deg(math.asin(joyUtil.LeftStick.y)),
-            properties.profile[properties.profileIndex].quad_Acc / pdControl.rot_D_multiply,
+            math.deg(throttle),
+            properties.profile[properties.profileIndex].max_throttle / pdControl.rot_D_multiply,
             3,
             false)
-        pdControl.rotInner(
-            math.deg(math.asin(joyUtil.RightStick.x)),
-            math.deg(math.asin(joyUtil.LeftStick.x)),
-            math.deg(math.asin(joyUtil.RightStick.y)),
-            properties.profile[properties.profileIndex].quad_P,
-            properties.profile[properties.profileIndex].quad_D)
+        local xRot = math.asin(joyUtil.RightStick.x) * pdControl.tmpp
+        local yRot = math.asin(joyUtil.LeftStick.x) * pdControl.tmpp
+        local zRot = math.asin(joyUtil.RightStick.y) * pdControl.tmpp
+        xRot = getRate(prf.roll_rc_rate, prf.roll_s_rate, prf.roll_expo, xRot)
+        yRot = getRate(prf.yaw_rc_rate, prf.yaw_s_rate, prf.yaw_expo, yRot)
+        zRot = getRate(prf.pitch_rc_rate, prf.pitch_s_rate, prf.pitch_expo, zRot)
+        pdControl.quatRot(xRot, yRot, zRot)
     end
 end
 
@@ -1306,7 +1363,7 @@ pdControl.ShipCamera = function()
         maxSize = math.max(maxSize, parentShip.size.y)
         local range = { x = -maxSize - xOffset, y = 0, z = 0 }
         local pos = {}
-        
+
         pos.x = parentShip.pos.x + parentShip.velocity.x
         pos.y = parentShip.pos.y + parentShip.velocity.y
         pos.z = parentShip.pos.z + parentShip.velocity.z
@@ -1479,7 +1536,10 @@ local shipNet_connect_Page = setmetatable({ pageId = 17, pageName = "shipNet_cal
 local set_camera           = setmetatable({ pageId = 18, pageName = "set_camera" }, { __index = abstractWindow })
 local set_shipFollow       = setmetatable({ pageId = 19, pageName = "set_shipFollow" }, { __index = abstractWindow })
 local set_anchorage        = setmetatable({ pageId = 20, pageName = "set_anchorage" }, { __index = abstractWindow })
-local mass_fix             = setmetatable({ pageId = 20, pageName = "mass_fix" }, { __index = abstractWindow })
+local mass_fix             = setmetatable({ pageId = 21, pageName = "mass_fix" }, { __index = abstractWindow })
+local rate_Roll            = setmetatable({ pageId = 22, pageName = "rate_Roll" }, { __index = abstractWindow })
+local rate_Yaw             = setmetatable({ pageId = 23, pageName = "rate_Yaw" }, { __index = abstractWindow })
+local rate_Pitch           = setmetatable({ pageId = 24, pageName = "rate_Pitch" }, { __index = abstractWindow })
 
 flightPages                = {
     modPage,              --1
@@ -1503,6 +1563,9 @@ flightPages                = {
     set_shipFollow,       --19
     set_anchorage,        --20
     mass_fix,             --21
+    rate_Roll,            --22
+    rate_Yaw,             --23
+    rate_Pitch,           --24
 }
 
 --winIndex = 1
@@ -2606,35 +2669,40 @@ function set_quadFPV:init()
         properties.other
     self.indexFlag = 5
     self.buttons = {
-        { text = "<",             x = 1, y = 1, blitF = title,                           blitB = bg },
-        { text = "P: --      ++", x = 2, y = 3, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
-        { text = "D: --      ++", x = 2, y = 4, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
-        { text = "ACC--      ++", x = 2, y = 5, blitF = genStr(font, 3) .. "ffffffffff", blitB = genStr(bg, 3) .. "b5" .. genStr(bg, 6) .. "1e" },
-        { text = "rate         ", x = 2, y = 7, blitF = genStr(font, 13),                blitB = genStr(bg, 13),                                select = genStr(select, 13), selected = false, flag = false },
-        { text = "AccRate      ", x = 2, y = 8, blitF = genStr(font, 13),                blitB = genStr(bg, 13),                                select = genStr(select, 13), selected = false, flag = false }
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "Rate_Roll >",  x = 2, y = 3, blitF = genStr(font, 11),blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Rate_Yaw  >",  x = 2, y = 4, blitF = genStr(font, 11),blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Rate_Pitch>",  x = 2, y = 5, blitF = genStr(font, 11),blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+
+        { text = "Throttle:",     x = 2, y = 6, blitF = genStr(other, 9),             blitB = genStr(bg, 9) },
+        { text = "max_val-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "mid    -    +", x = 2, y = 8, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "expo   -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
     }
 end
 
 function set_quadFPV:refresh()
     self:refreshButtons()
     self:refreshTitle()
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setCursorPos(1, 2)
+    self.window.blit(("profile:%s"):format(properties.profileIndex), genStr(properties.other, 16),
+        genStr(properties.bg, 16))
+
     for k, v in pairs(self.buttons) do
         if v.selected then
             self.window.setCursorPos(v.x, v.y)
             self.window.blit(v.text, v.blitB, v.select)
         end
     end
-    local profile = properties.profile[properties.profileIndex]
+
     self.window.setTextColor(getColorDec(properties.font))
-    self.window.setCursorPos(1, 2)
-    self.window.blit(("profile:%s"):format(properties.profileIndex), genStr(properties.other, 16),
-        genStr(properties.bg, 16))
-    self.window.setCursorPos(8, 3)
-    self.window.write(string.format("%0.2f", profile.quad_P))
-    self.window.setCursorPos(8, 4)
-    self.window.write(string.format("%0.2f", profile.quad_D))
-    self.window.setCursorPos(8, 5)
-    self.window.write(string.format("%0.2f", profile.quad_Acc))
+    self.window.setCursorPos(10, 7)
+    self.window.write(string.format("%0.2f", profile.max_throttle))
+    self.window.setCursorPos(10, 8)
+    self.window.write(string.format("%0.2f", profile.throttle_mid))
+    self.window.setCursorPos(10, 9)
+    self.window.write(string.format("%0.2f", profile.throttle_expo))
 end
 
 function set_quadFPV:onTouch(x, y)
@@ -2646,17 +2714,21 @@ function set_quadFPV:onTouch(x, y)
     if x > 2 and y > 2 then
         local profile = properties.profile[properties.profileIndex]
         local result = 0
-        if y > 2 and y < 6 then
-            if x == 5 then result = -0.1 end
-            if x == 6 then result = -0.01 end
-            if x == 13 then result = 0.01 end
-            if x == 14 then result = 0.1 end
-            if y == 3 then
-                profile.quad_P = profile.quad_P + result < 0 and 0 or profile.quad_P + result
-            elseif y == 4 then
-                profile.quad_D = profile.quad_D + result < 0 and 0 or profile.quad_D + result
-            elseif y == 5 then
-                profile.quad_Acc = profile.quad_Acc + result < 0 and 0 or profile.quad_Acc + result
+        if y > 6 and y < 10 then
+            if x == 9 then result = -0.01 end
+            if x == 14 then result = 0.01 end
+            if y == 7 then
+                profile.max_throttle = profile.max_throttle + result
+                profile.max_throttle = profile.max_throttle < 0 and 0 or
+                    (profile.max_throttle > 9 and 9 or profile.max_throttle)
+            elseif y == 8 then
+                profile.throttle_mid = profile.throttle_mid + result
+                profile.throttle_mid = profile.throttle_mid < 0 and 0 or
+                    (profile.throttle_mid > 1 and 1 or profile.throttle_mid)
+            elseif y == 9 then
+                profile.throttle_expo = profile.throttle_expo + result
+                profile.throttle_expo = profile.throttle_expo < 0 and 0 or
+                    (profile.throttle_expo > 1 and 1 or profile.throttle_expo)
             end
         end
     end
@@ -2666,16 +2738,181 @@ function set_quadFPV:onTouch(x, y)
                 if not v.selected then
                     v.selected = true
                 else
-                    if v.text == "rate         " then
-                        --?.indexFlag = 6
-                        --properties.winIndex[self.name][self.row][self.column] = ?
-                    elseif v.text == "AccRate      " then
-                        --?.indexFlag = 6
-                        --properties.winIndex[self.name][self.row][self.column] = ?
+                    if v.text == "Rate_Roll >" then
+                        self.windows[self.row][self.column][22].indexFlag = 7
+                        properties.winIndex[self.name][self.row][self.column] = 22
+                    elseif v.text == "Rate_Yaw  >" then
+                        self.windows[self.row][self.column][23].indexFlag = 7
+                        properties.winIndex[self.name][self.row][self.column] = 23
+                    elseif v.text == "Rate_Pitch>" then
+                        self.windows[self.row][self.column][24].indexFlag = 7
+                        properties.winIndex[self.name][self.row][self.column] = 24
                     end
                 end
             else
                 v.selected = false
+            end
+        end
+    end
+end
+
+--winIndex = 22
+function rate_Roll:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 7
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "rc_Rate-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "s_Rate -    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "expo   -    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "maxDeg:     d/s", x = 1, y = 9, blitF = genStr(font, 15), blitB = genStr(bg, 15)},
+    }
+end
+
+function rate_Roll:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(10, 3)
+    self.window.write(string.format("%0.2f", profile.roll_rc_rate))
+    self.window.setCursorPos(10, 5)
+    self.window.write(string.format("%0.2f", profile.roll_s_rate))
+    self.window.setCursorPos(10, 7)
+    self.window.write(string.format("%0.2f", profile.roll_expo))
+    self.window.setCursorPos(8, 9)
+    self.window.write(string.format("%d", getRate(profile.roll_rc_rate, profile.roll_s_rate, profile.roll_expo, 1.0)))
+end
+
+function rate_Roll:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if (y > 2 and y < 6) or (y > 6 and y < 10) then
+            if x == 9 then result = -0.01 end
+            if x == 14 then result = 0.01 end
+            if y == 3 then
+                profile.roll_rc_rate = profile.roll_rc_rate + result
+                profile.roll_rc_rate = profile.roll_rc_rate < 0 and 0 or
+                (profile.roll_rc_rate > 2.55 and 2.55 or profile.roll_rc_rate)
+            elseif y == 5 then
+                profile.roll_s_rate = profile.roll_s_rate + result
+                profile.roll_s_rate = profile.roll_s_rate < 0 and 0 or
+                (profile.roll_s_rate > 1 and 1 or profile.roll_s_rate)
+            elseif y == 7 then
+                profile.roll_expo = profile.roll_expo + result
+                profile.roll_expo = profile.roll_expo < 0 and 0 or (profile.roll_expo > 1 and 1 or profile.roll_expo)
+            end
+        end
+    end
+end
+
+--winIndex = 23
+function rate_Yaw:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 7
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "rc_Rate-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "s_Rate -    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "expo   -    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "maxDeg:     d/s", x = 1, y = 9, blitF = genStr(font, 15), blitB = genStr(bg, 15)},
+    }
+end
+
+function rate_Yaw:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(10, 3)
+    self.window.write(string.format("%0.2f", profile.yaw_rc_rate))
+    self.window.setCursorPos(10, 5)
+    self.window.write(string.format("%0.2f", profile.yaw_s_rate))
+    self.window.setCursorPos(10, 7)
+    self.window.write(string.format("%0.2f", profile.yaw_expo))
+    self.window.setCursorPos(8, 9)
+    self.window.write(string.format("%d", getRate(profile.yaw_rc_rate, profile.yaw_s_rate, profile.yaw_expo, 1.0)))
+end
+
+function rate_Yaw:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if (y > 2 and y < 6) or (y > 6 and y < 10) then
+            if x == 9 then result = -0.01 end
+            if x == 14 then result = 0.01 end
+            if y == 3 then
+                profile.yaw_rc_rate = profile.yaw_rc_rate + result
+                profile.yaw_rc_rate = profile.yaw_rc_rate < 0 and 0 or
+                (profile.yaw_rc_rate > 2.55 and 2.55 or profile.yaw_rc_rate)
+            elseif y == 5 then
+                profile.yaw_s_rate = profile.yaw_s_rate + result
+                profile.yaw_s_rate = profile.yaw_s_rate < 0 and 0 or
+                (profile.yaw_s_rate > 1 and 1 or profile.yaw_s_rate)
+            elseif y == 7 then
+                profile.yaw_expo = profile.yaw_expo + result
+                profile.yaw_expo = profile.yaw_expo < 0 and 0 or (profile.yaw_expo > 1 and 1 or profile.yaw_expo)
+            end
+        end
+    end
+end
+
+--winIndex = 24
+function rate_Pitch:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 7
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "rc_Rate-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "s_Rate -    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "expo   -    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "maxDeg:     d/s", x = 1, y = 9, blitF = genStr(font, 15), blitB = genStr(bg, 15)},
+    }
+end
+
+function rate_Pitch:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+
+    local profile = properties.profile[properties.profileIndex]
+    self.window.setTextColor(getColorDec(properties.font))
+    self.window.setCursorPos(10, 3)
+    self.window.write(string.format("%0.2f", profile.pitch_rc_rate))
+    self.window.setCursorPos(10, 5)
+    self.window.write(string.format("%0.2f", profile.pitch_s_rate))
+    self.window.setCursorPos(10, 7)
+    self.window.write(string.format("%0.2f", profile.pitch_expo))
+    self.window.setCursorPos(8, 9)
+    self.window.write(string.format("%d", getRate(profile.pitch_rc_rate, profile.pitch_s_rate, profile.pitch_expo, 1.0)))
+end
+
+function rate_Pitch:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if x > 2 and y > 2 then
+        local profile = properties.profile[properties.profileIndex]
+        local result = 0
+        if (y > 2 and y < 6) or (y > 6 and y < 10) then
+            if x == 9 then result = -0.01 end
+            if x == 14 then result = 0.01 end
+            if y == 3 then
+                profile.pitch_rc_rate = profile.pitch_rc_rate + result
+                profile.pitch_rc_rate = profile.pitch_rc_rate < 0 and 0 or
+                (profile.pitch_rc_rate > 2.55 and 2.55 or profile.pitch_rc_rate)
+            elseif y == 5 then
+                profile.pitch_s_rate = profile.pitch_s_rate + result
+                profile.pitch_s_rate = profile.pitch_s_rate < 0 and 0 or
+                (profile.pitch_s_rate > 1 and 1 or profile.pitch_s_rate)
+            elseif y == 7 then
+                profile.pitch_expo = profile.pitch_expo + result
+                profile.pitch_expo = profile.pitch_expo < 0 and 0 or (profile.pitch_expo > 1 and 1 or profile.pitch_expo)
             end
         end
     end
@@ -3840,16 +4077,16 @@ end
 local runFlight = function()
     sleep(0.1)
     if physics_flag then
-        pdControl.basicYSpeed = 29.5 + properties.integral
+        pdControl.basicYSpeed = 30
         pdControl.helicopt_P_multiply = 1.5
         pdControl.helicopt_D_multiply = 4
         pdControl.rot_P_multiply = 1.5
         pdControl.rot_D_multiply = 0.5
         pdControl.move_P_multiply = 2
         pdControl.move_D_multiply = 100
-        pdControl.airMass_multiply = 20
+        pdControl.airMass_multiply = 10
     else
-        pdControl.basicYSpeed = 10 + properties.integral
+        pdControl.basicYSpeed = 10
         return
     end
 
