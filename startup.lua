@@ -1022,9 +1022,9 @@ pdControl.rotInner = function(xRot, yRot, zRot, p, d)
     pdControl.rollSpeed  = resetAngelRange(attUtil.omega.x + xRot) * p + -attUtil.omega.x * 7 * d
     pdControl.yawSpeed   = resetAngelRange(attUtil.omega.y + yRot) * p + -attUtil.omega.y * 7 * d
     ship.applyRotDependentTorque(
-        pdControl.rollSpeed * attUtil.MomentOfInertiaTensor,
-        pdControl.yawSpeed * attUtil.MomentOfInertiaTensor,
-        pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor)
+        pdControl.rollSpeed  * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2),
+        pdControl.yawSpeed   * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2),
+        pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2))
 end
 
 pdControl.rotate2Euler = function(euler, p, d)
@@ -1114,9 +1114,9 @@ pdControl.quatRot = function(xRot, yRot, zRot)
     pdControl.ySpeed = (attUtil.omega.y + yRot) * 0.3456 + -attUtil.omega.y * 7.25
     pdControl.zSpeed = (attUtil.omega.z + zRot) * 0.3456 + -attUtil.omega.z * 7.25
     ship.applyRotDependentTorque(
-        pdControl.xSpeed * attUtil.MomentOfInertiaTensor,
-        pdControl.ySpeed * attUtil.MomentOfInertiaTensor,
-        pdControl.zSpeed * attUtil.MomentOfInertiaTensor)
+        pdControl.xSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2),
+        pdControl.ySpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().y ^ 2),
+        pdControl.zSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().z ^ 2))
 end
 
 pdControl.quadFPV = function()
