@@ -136,6 +136,7 @@ system.reset = function()
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 0.2,
                 camera_move_speed = 0.2,
+                shipFollow_move_speed = 0.2,
             },
             joyStick = {
                 spaceShip_P = 1,        --角速度比例, 决定转向快慢
@@ -167,6 +168,7 @@ system.reset = function()
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 1,
                 camera_move_speed = 1,
+                shipFollow_move_speed = 0.2,
             }
         },
         lock = false,
@@ -247,7 +249,7 @@ local function arrayTableRemoveElement(targetTable, value)
     end
 end
 
-local copysign = function (num1, num2)
+local copysign = function(num1, num2)
     num1 = math.abs(num1)
     num1 = num2 > 0 and num1 or -num1
     return num1
@@ -348,6 +350,7 @@ function getColorDec(paint)
     end
     return result
 end
+
 local quatMultiply = function(q1, q2)
     local newQuat = {}
     newQuat.w = -q1.x * q2.x - q1.y * q2.y - q1.z * q2.z + q1.w * q2.w
@@ -968,7 +971,7 @@ joyUtil.getJoyInput = function()
             end
 
             if physics_flag then
-                joyUtil.cd = 12
+                joyUtil.cd = 16
             else
                 joyUtil.cd = 4
             end
@@ -1370,14 +1373,14 @@ pdControl.airShip = function()
 end
 
 pdControl.gotoPosition = function(euler, pos, maxSpeed)
-    pdControl.gotoPositionWithPD(euler, pos, maxSpeed, 8, 6)
+    pdControl.gotoPositionWithPD(euler, attUtil.position, pos, maxSpeed, 8, 3.6, 6)
 end
 
-pdControl.gotoPositionWithPD = function (euler, pos, maxSpeed, p, d)
+pdControl.gotoPositionWithPD = function(euler, pos1, pos2, maxSpeed, p, p2, d)
     local xVal, yVal, zVal
-    xVal = (pos.x - attUtil.position.x) * 3.6
-    yVal = (pos.y - attUtil.position.y) * 3.6
-    zVal = (pos.z - attUtil.position.z) * 3.6
+    xVal = (pos2.x - pos1.x) * p2
+    yVal = (pos2.y - pos1.y) * p2
+    zVal = (pos2.z - pos1.z) * p2
     if properties.mode ~= 9 then
         xVal = math.abs(xVal) > maxSpeed and copysign(maxSpeed, xVal) or xVal
         yVal = math.abs(yVal) > maxSpeed and copysign(maxSpeed, yVal) or yVal
@@ -1488,7 +1491,7 @@ local cameraQuat = { w = 1, x = 0, y = 0, z = 0 }
 local xOffset = 0
 pdControl.ShipCamera = function()
     if parentShip.id ~= -1 then
-        xOffset = xOffset + math.asin(joyUtil.BTStick.y * properties.profile[properties.profileIndex].camera_move_speed)
+        xOffset = xOffset + math.asin(joyUtil.BTStick.y) * properties.profile[properties.profileIndex].camera_move_speed
         xOffset = xOffset < 3 and 3 or xOffset
         xOffset = xOffset > 64 and 64 or xOffset
         local maxSize = math.max(parentShip.size.x, parentShip.size.z)
@@ -1500,10 +1503,10 @@ pdControl.ShipCamera = function()
         pos.y = parentShip.pos.y + parentShip.velocity.y
         pos.z = parentShip.pos.z + parentShip.velocity.z
         local speedMult = xOffset * 2
-        speedMult = speedMult < 16 and 16 or speedMult
+        speedMult = speedMult < 8 and 8 or speedMult
         local myRot = euler2Quat(
-            math.asin(joyUtil.RightStick.x) / 16 * properties.profile[properties.profileIndex].camera_rot_speed,
-            math.asin(joyUtil.LeftStick.x) / speedMult * properties.profile[properties.profileIndex].camera_rot_speed,
+            math.asin(joyUtil.LeftStick.x) / 16 * properties.profile[properties.profileIndex].camera_rot_speed,
+            math.asin(joyUtil.RightStick.x) / speedMult * properties.profile[properties.profileIndex].camera_rot_speed,
             math.asin(joyUtil.LeftStick.y) / speedMult * properties.profile[properties.profileIndex].camera_rot_speed
         )
 
@@ -1515,6 +1518,38 @@ pdControl.ShipCamera = function()
         pdControl.rotate2quat(getConjQuat(cameraQuat), 0.9, 2.8)
         pdControl.gotoPosition(nil, pos, properties.MAX_MOVE_SPEED)
     end
+end
+
+local shipFollow_offset
+pdControl.ShipFollow = function()
+    if parentShip.id == -1 then return end
+    if not shipFollow_offset then shipFollow_offset = { x = parentShip.size.x + 5, y = 0, z = 0 } end
+    shipFollow_offset.x = shipFollow_offset.x +
+    math.asin(joyUtil.BTStick.y) * properties.profile[properties.profileIndex].camera_move_speed
+    shipFollow_offset.z = shipFollow_offset.z +
+    math.asin(joyUtil.BTStick.x) * properties.profile[properties.profileIndex].camera_move_speed
+    shipFollow_offset.y = shipFollow_offset.y +
+    math.asin(joyUtil.LeftStick.y) * properties.profile[properties.profileIndex].camera_move_speed
+
+    local pos = {
+        x = parentShip.pos.x + parentShip.velocity.x,
+        y = parentShip.pos.y + parentShip.velocity.y,
+        z = parentShip.pos.z + parentShip.velocity.z
+    }
+
+    local newPos = RotateVectorByQuat(parentShip.quat, shipFollow_offset)
+
+    pos.x = pos.x + newPos.x
+    pos.y = pos.y + newPos.y
+    pos.z = pos.z + newPos.z
+
+    local xRot, yRot, zRot = math.deg(math.asin(joyUtil.RightStick.x)), math.deg(math.asin(joyUtil.LeftStick.x)),
+        math.deg(math.asin(joyUtil.RightStick.y))
+    pdControl.rotInner(
+        xRot, yRot, zRot,
+        properties.profile[properties.profileIndex].spaceShip_P,
+        properties.profile[properties.profileIndex].spaceShip_D)
+    pdControl.gotoPosition(nil, pos, properties.MAX_MOVE_SPEED)
 end
 
 pdControl.anchorage_getTgList = function()
@@ -1532,33 +1567,26 @@ pdControl.anchorage_getTgList = function()
     local maxBorder = math.abs(size.x) > math.abs(size.y) and size.x or size.y
     maxBorder = math.abs(maxBorder) > math.abs(size.z) and maxBorder or size.z
 
-    local d
     local p2 = { x = 0, y = 0, z = 0 }
     if parentShip.anchorage.entry == "top" then
-        p2.y = size.y
-        d = size.y
+        p2.y = size.y * 0.75
     elseif parentShip.anchorage.entry == "bottom" then
-        p2.y = -size.y
-        d = size.y
+        p2.y = -size.y * 0.75
     elseif parentShip.anchorage.entry == "left" then
-        p2.z = size.z
-        d = size.z
+        p2.z = size.z * 0.75
     elseif parentShip.anchorage.entry == "right" then
-        p2.z = -size.z
-        d = size.z
+        p2.z = -size.z * 0.75
     elseif parentShip.anchorage.entry == "back" then
-        p2.x = size.x
-        d = size.x
+        p2.x = size.x * 0.75
     elseif parentShip.anchorage.entry == "front" then
-        p2.x = -size.x
-        d = size.x
+        p2.x = -size.x * 0.75
     end
     p2 = RotateVectorByQuat(parentShip.quat, p2)
 
     for k, v in pairs(list[2]) do
         list[2][k] = list[2][k] + p2[k]
     end
-
+    local d = math.sqrt(p2.x ^ 2 + p2.y ^ 2 + p2.z ^ 2)
     return list, d
 end
 
@@ -1573,13 +1601,14 @@ pdControl.anchorage = function()
         y = parentShip.anchorage.pos.y - attUtil.position.y,
         z = parentShip.anchorage.pos.z - attUtil.position.z
     }
-    
-    local distance =  math.sqrt(sub.x ^ 2 + sub.z ^ 2 + sub.z ^ 2)
+
+    local distance = math.sqrt(sub.x ^ 2 + sub.y ^ 2 + sub.z ^ 2)
     local targetPos, d = pdControl.anchorage_getTgList()
+    local pcPos = getWorldOffsetOfPcPos({ x = 0, y = 0, z = 0 })
     if distance > d + 2 then
         local tmpDis = math.sqrt((targetPos[2].x - attUtil.position.x) ^ 2 +
-        (targetPos[2].y - attUtil.position.y) ^ 2 +
-        (targetPos[2].z - attUtil.position.z) ^ 2)
+            (targetPos[2].y - attUtil.position.y) ^ 2 +
+            (targetPos[2].z - attUtil.position.z) ^ 2)
         local tgAg = {
             yaw = math.deg(math.atan2(sub.z, -sub.x)),
             roll = 0,
@@ -1588,19 +1617,20 @@ pdControl.anchorage = function()
         if tmpDis < 10 then
             tgAg.pitch = 0
         end
+        tgAg.pitch = math.abs(tgAg.pitch) > 80 and copysign(80, tgAg.pitch) or tgAg.pitch
         if math.abs(resetAngelRange(tgAg.yaw - attUtil.eulerAngle.yaw)) > 9 or
-        math.abs(resetAngelRange(tgAg.pitch - attUtil.eulerAngle.pitch)) > 9 then
+            math.abs(resetAngelRange(tgAg.pitch - attUtil.eulerAngle.pitch)) > 6 then
             pdControl.rotate2Euler2(tgAg, 0.6, 2.8)
             pdControl.gotoPosition(nil, attUtil.position, 33)
         else
-            local maxSpeed = distance / 10
+            local maxSpeed = distance / 5
             maxSpeed = maxSpeed > 33 and 33 or maxSpeed
             maxSpeed = maxSpeed < 3 and 3 or maxSpeed
-            pdControl.gotoPositionWithPD(tgAg, targetPos[2], maxSpeed, 2, 0.5)
+            pdControl.gotoPositionWithPD(tgAg, pcPos, targetPos[2], maxSpeed, 3, 3.6, 2)
         end
     else
         pdControl.rotate2quat(getConjQuat(parentShip.quat), 0.36, 2.8)
-        pdControl.gotoPosition(nil, targetPos[1], 3)
+        pdControl.gotoPositionWithPD(nil, pcPos, targetPos[1], 9, 3, 3.6, 6)
     end
 end
 ---------screens---------
@@ -3928,6 +3958,9 @@ function loadingScreen:refresh()
     self.index = self.index + 1
     if self.step >= 16 then
         monitorUtil.newScreen(self.name, self.postload)
+        for k, screen in pairs(monitorUtil.screens) do
+            screen:refresh()
+        end
     end
 end
 
@@ -4003,6 +4036,25 @@ monitorUtil.scanMonitors = function()
 end
 
 monitorUtil.refresh = function()
+    monitorUtil.scanMonitors()
+    for n, screen in pairs(monitorUtil.screens) do
+        if screen.windows then
+            for i = 1, #screen.windows, 1 do
+                for j = 1, #screen.windows[i], 1 do
+                    local page = properties.winIndex[n][i][j]
+                    if page == 2 or page == 4 or page == 3 or page == 17 then
+                        screen.windows[i][j][page]:refresh()
+                        --commands.execAsync(("say %s"):format(screen.windows[i][j][page].pageName))
+                    end
+                end
+            end
+        else
+            screen:refresh()
+        end
+    end
+end
+
+monitorUtil.refreshAll = function()
     monitorUtil.scanMonitors()
     for _, screen in pairs(monitorUtil.screens) do
         screen:refresh()
@@ -4177,8 +4229,9 @@ local shipNet_getMessage = function() --从广播中筛选
                         msg.beat = beat_ct
                         table.insert(shipNet_list, msg)
                     end
-                elseif msg.request_connect == "call" and msg.name and msg.code then            --收到连接请求
+                elseif msg.request_connect == "call" and msg.name and msg.code then --收到连接请求
                     table.insert(callList, { id = id, name = msg.name, code = msg.code, ct = 10 })
+                    monitorUtil.refreshAll()
                 elseif msg.request_connect == "back" and msg.name and msg.code == captcha then --回听请求是否被接受
                     if msg.result == "agree" then
                         parentShip.id = id
@@ -4195,6 +4248,7 @@ local shipNet_getMessage = function() --从广播中筛选
                     end
                     call_ct = 0
                     calling = -1
+                    monitorUtil.refreshAll()
                 end
             end
         else
@@ -4276,7 +4330,7 @@ function flightUpdate()
         elseif properties.mode == 9 then
             pdControl.ShipCamera()
         elseif properties.mode == 10 then
-            --commands.execAsync("say 10")
+            pdControl.ShipFollow()
         elseif properties.mode == 11 then
             pdControl.anchorage()
         elseif properties.mode == 12 then
@@ -4333,8 +4387,14 @@ local listener = function()
                 end
             end
             monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
+            for k, screen in pairs(monitorUtil.screens) do
+                screen:refresh()
+            end
         elseif event == "mouse_click" and monitorUtil.screens["computer"] then
             monitorUtil.screens["computer"]:onTouch(eventData[3], eventData[4])
+            for k, screen in pairs(monitorUtil.screens) do
+                screen:refresh()
+            end
         elseif event == "key" and not tableHasValue(properties.enabledMonitors, "computer") then
             table.insert(properties.enabledMonitors, "computer")
             system.updatePersistentData()
