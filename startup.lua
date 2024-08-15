@@ -107,12 +107,12 @@ system.reset = function()
         coupled = true,
         profile = {
             keyboard = {
-                spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 2.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-                spaceShip_Acc = 2,      --星舰模式油门速度
-                spaceShip_SideMove = 2, --星舰模式横移速度
+                spaceShip_P = 0.05,        --角速度比例, 决定转向快慢
+                spaceShip_D = 0.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 0.5,      --星舰模式油门速度
+                spaceShip_SideMove = 0.5, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
-                spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                spaceShip_move_D = 0.5, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 roll_rc_rate = 1.1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
@@ -139,12 +139,12 @@ system.reset = function()
                 shipFollow_move_speed = 0.2,
             },
             joyStick = {
-                spaceShip_P = 1,        --角速度比例, 决定转向快慢
-                spaceShip_D = 2.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-                spaceShip_Acc = 2,      --星舰模式油门速度
-                spaceShip_SideMove = 2, --星舰模式横移速度
+                spaceShip_P = 0.05,        --角速度比例, 决定转向快慢
+                spaceShip_D = 0.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 0.5,      --星舰模式油门速度
+                spaceShip_SideMove = 0.5, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
-                spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                spaceShip_move_D = 0.5, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 roll_rc_rate = 1.1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
@@ -965,15 +965,16 @@ joyUtil.getJoyInput = function()
                 end
                 attUtil.setLastPos()
                 properties.mode = index
+                monitorUtil.refreshAll()
             elseif joyUtil.right or joyUtil.left then
             elseif joyUtil.RightJoyClick then
                 properties.coupled = not properties.coupled
             end
 
             if physics_flag then
-                joyUtil.cd = 16
-            else
                 joyUtil.cd = 4
+            else
+                joyUtil.cd = 16
             end
         end
         joyUtil.cd = joyUtil.cd > 0 and joyUtil.cd - 1 or 0
@@ -983,8 +984,8 @@ joyUtil.getJoyInput = function()
 end
 
 joyUtil.defaultOutput = function()
+    joyUtil.LeftStick.y = 0 + properties.zeroPoint
     joyUtil.LeftStick.x = 0
-    joyUtil.LeftStick.y = 0
     joyUtil.RightStick.x = 0
     joyUtil.RightStick.y = 0
     joyUtil.LeftJoyClick = false
@@ -1070,10 +1071,10 @@ pdControl.quadUp = function(yVal, p, d, hov)
     d = d * pdControl.move_D_multiply
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p +
+        pdControl.ySpeed = yVal * p +
             pdControl.basicYSpeed * (-properties.gravity + 1) + -omegaApplyRot.y * d
     else
-        pdControl.ySpeed = (yVal + -math.deg(math.asin(properties.zeroPoint))) * p
+        pdControl.ySpeed = yVal * p
     end
 
     applyRotDependentForce(0, pdControl.ySpeed * attUtil.mass, 0)
@@ -1250,7 +1251,12 @@ pdControl.quadFPV = function()
                 2)
         end
     else
-        local throttle = math.asin(joyUtil.LeftStick.y) * pdControl.tmpp
+        local throttle
+        if properties.zeroPoint == -1 then
+            throttle = math.asin((joyUtil.LeftStick.y + 1) / 2) * pdControl.tmpp
+        else
+            throttle = math.asin(joyUtil.LeftStick.y) * pdControl.tmpp
+        end
         throttle = getThrottle(prf.throttle_mid, prf.throttle_expo, throttle) * 2 * prf.max_throttle
         --commands.execAsync(("say %d"):format(throttle * 50))
         pdControl.quadUp(
@@ -1525,11 +1531,11 @@ pdControl.ShipFollow = function()
     if parentShip.id == -1 then return end
     if not shipFollow_offset then shipFollow_offset = { x = parentShip.size.x + 5, y = 0, z = 0 } end
     shipFollow_offset.x = shipFollow_offset.x +
-    math.asin(joyUtil.BTStick.y) * properties.profile[properties.profileIndex].camera_move_speed
+        math.asin(joyUtil.BTStick.y) * properties.profile[properties.profileIndex].camera_move_speed
     shipFollow_offset.z = shipFollow_offset.z +
-    math.asin(joyUtil.BTStick.x) * properties.profile[properties.profileIndex].camera_move_speed
+        math.asin(joyUtil.BTStick.x) * properties.profile[properties.profileIndex].camera_move_speed
     shipFollow_offset.y = shipFollow_offset.y +
-    math.asin(joyUtil.LeftStick.y) * properties.profile[properties.profileIndex].camera_move_speed
+        math.asin(joyUtil.LeftStick.y) * properties.profile[properties.profileIndex].camera_move_speed
 
     local pos = {
         x = parentShip.pos.x + parentShip.velocity.x,
@@ -3423,7 +3429,7 @@ function set_simulate:refresh()
     self.window.setCursorPos(9, 5)
     self.window.write(string.format("%0.1f", properties.gravity))
     self.window.setCursorPos(9, 7)
-    self.window.write(string.format("%0.1f", properties.zeroPoint))
+    self.window.write(string.format("%d", properties.zeroPoint))
 end
 
 function set_simulate:onTouch(x, y)
@@ -3437,7 +3443,7 @@ function set_simulate:onTouch(x, y)
         elseif y == 5 then
             properties.gravity = properties.gravity + result > 0 and 0 or properties.gravity + result
         elseif y == 7 then
-            properties.zeroPoint = properties.zeroPoint + result < 0 and 0 or properties.zeroPoint + result
+            properties.zeroPoint = properties.zeroPoint == 0 and -1 or 0
         end
     end
 end
