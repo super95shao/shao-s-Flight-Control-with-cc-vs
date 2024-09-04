@@ -1,14 +1,3 @@
---[[ if not ship then
-    if term.isColor() then term.setTextColor(colors.red) end
-    print("ShipAPI unavailable. Either this computer is not on a ship, or CC-VS is not installed.")
-    return
-end
-if not ship.setStatic then
-    if term.isColor() then term.setTextColor(colors.red) end
-    print(
-        "ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
-    return
-end ]]
 peripheral.find("modem", rednet.open)
 ---------inner---------
 local modelist = {
@@ -24,6 +13,7 @@ local modelist = {
     { name = "ShipFollow", flag = false },
     { name = "Anchorage",  flag = false },
     { name = "spaceFpv",   flag = false },
+    { name = "Fixed-wing", flag = false },
 }
 
 local system, properties, attUtil, monitorUtil, joyUtil, pdControl, rayCaster, scanner, timeUtil, shipNet_p2p_send
@@ -107,12 +97,12 @@ system.reset = function()
         coupled = true,
         profile = {
             keyboard = {
-                spaceShip_P = 0.05,        --角速度比例, 决定转向快慢
-                spaceShip_D = 0.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_P = 0.05,       --角速度比例, 决定转向快慢
+                spaceShip_D = 0.32,       --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 0.5,      --星舰模式油门速度
                 spaceShip_SideMove = 0.5, --星舰模式横移速度
-                spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
-                spaceShip_move_D = 0.5, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                spaceShip_Burner = 3.0,   --星舰模式加力燃烧倍率
+                spaceShip_move_D = 0.5,   --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 roll_rc_rate = 1.1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
@@ -139,12 +129,12 @@ system.reset = function()
                 shipFollow_move_speed = 0.2,
             },
             joyStick = {
-                spaceShip_P = 0.05,        --角速度比例, 决定转向快慢
-                spaceShip_D = 0.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-                spaceShip_Acc = 0.5,      --星舰模式油门速度
-                spaceShip_SideMove = 0.5, --星舰模式横移速度
+                spaceShip_P = 1,        --角速度比例, 决定转向快慢
+                spaceShip_D = 2.32,     --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 2,      --星舰模式油门速度
+                spaceShip_SideMove = 2, --星舰模式横移速度
                 spaceShip_Burner = 3.0, --星舰模式加力燃烧倍率
-                spaceShip_move_D = 0.5, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
+                spaceShip_move_D = 1.6, --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 roll_rc_rate = 1.1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
@@ -167,7 +157,7 @@ system.reset = function()
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 1,
-                camera_move_speed = 1,
+                camera_move_speed = 0.2,
                 shipFollow_move_speed = 0.2,
             }
         },
@@ -175,6 +165,11 @@ system.reset = function()
         zeroPoint = 0,
         gravity = -2,
         airMass = 1, --空气密度 (风阻)
+        wing = {
+            wings        = { pos = { x = ship.getSize().x / 8, y = 0, z = ship.getSize().z / 4 }, size = 1 },
+            tail_wings   = { pos = { x = ship.getSize().x / 2, y = 0, z = 0 }, size = 0.25 },
+            verticalTail = { pos = { x = ship.getSize().x / 2, y = ship.getSize().y / 8, z = 0 }, size = 0.25 },
+        },
         rayCasterRange = 128,
         shipFace = "west",
         bg = "f",
@@ -185,11 +180,11 @@ system.reset = function()
         MAX_MOVE_SPEED = 99,                    --自动驾驶最大跟随速度
         pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
+        shipFollow_offset = { x = -3, y = 0, z = 0 },
         pointList = {                           --点循环模式，按照顺序逐个前往
-
         },
         anchorage_offset = {
-            x = 0,
+            x = -5,
             y = 0,
             z = 0
         },
@@ -782,7 +777,8 @@ attUtil = {
     initPoint = {},
     velocity = {},
     speed = {},
-    tmpFlags = {}
+    tmpFlags = {},
+    wingWeight = 0
 }
 attUtil.quatList = {
     west  = { w = -1, x = 0, y = 0, z = 0 },
@@ -813,6 +809,8 @@ attUtil.getAttWithCCTick = function()
     attUtil.velocity.z = ship.getVelocity().z / 20
     attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
     --commands.execAsync(("say w=%0.6f, x=%0.6f, y=%0.6f, z=%0.6f"):format(attUtil.quat.w, attUtil.quat.x, attUtil.quat.y, attUtil.quat.z))
+
+    attUtil.wingWeight = 1 / (properties.wing.wings.size * 2 + properties.wing.tail_wings.size)
 end
 
 attUtil.getAttWithPhysTick = function()
@@ -836,6 +834,7 @@ attUtil.getAttWithPhysTick = function()
     attUtil.velocity.y = attUtil.poseVel.velocity.y / 60
     attUtil.velocity.z = attUtil.poseVel.velocity.z / 60
     attUtil.speed = math.sqrt(ship.getVelocity().x ^ 2 + ship.getVelocity().y ^ 2 + ship.getVelocity().z ^ 2)
+    attUtil.wingWeight = 1 / ((properties.wing.wings.size + properties.wing.tail_wings.size) * 2)
     --commands.execAsync(("say w=%df, x=%df"):format(attUtil.quat.w * 1000, attUtil.quat.x * 1000))
 end
 
@@ -1318,6 +1317,87 @@ pdControl.spaceFpv = function()
     pdControl.quatRot(xRot, yRot, zRot)
 end
 
+--pdControl.fixedWing = function()
+--    local s = RotateVectorByQuat(attUtil.quat, attUtil.velocity)
+--    local worldForce = { x = 0, y = 0, z = 0 }
+--    local maxLen = math.max(attUtil.size.x, attUtil.size.z) * ship.getScale().x
+--    local pp = s.x * (properties.wing.wings.size + properties.wing.tail_wings.size) / 2
+--    pp = pp > 1 and 1 or pp
+--
+--    local powX = s.x ^ 2
+--    local xDrag = copysign(powX, -s.x) * 0.1
+--    local yDragBase = copysign(s.y ^ 2, -s.y) * (properties.wing.wings.size + properties.wing.tail_wings.size) * 20
+--    yDragBase = yDragBase + yDragBase * powX
+--    local zDrag = copysign(s.z ^ 2, -s.z) * properties.wing.verticalTail.size * 20
+--    zDrag = zDrag + zDrag * powX
+--
+--    local yForceBase = math.abs(math.cos(attUtil.pX.y) * math.cos(attUtil.pZ.y))
+--    worldForce.y = 1
+--    local p1 = properties.wing.wings.pos
+--    local p1w = attUtil.wingWeight * properties.wing.wings.size
+--    local p1Force = p1w * yForceBase * pdControl.basicYSpeed * pp + pp * p1w * math.deg(math.asin(joyUtil.LeftStick.y))
+--    local p1Rot = pp * p1w * math.deg(math.asin(joyUtil.RightStick.x))
+--    --math.asin(joyUtil.LeftStick.y)
+--
+--    local p3 = properties.wing.tail_wings.pos
+--    local p3w = attUtil.wingWeight * properties.wing.tail_wings.size
+--    local p3Force = p3w * yForceBase * pdControl.basicYSpeed * pp + pp * p3w * -math.deg(math.asin(joyUtil.LeftStick.y))
+--
+--    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, (p1Rot + p1Force) * attUtil.mass, 0, p1.x, p1.y, p1.z)
+--    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, (-p1Rot + p1Force )* attUtil.mass, 0, p1.x, p1.y, -p1.z)
+--
+--    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, p3Force * 2 * attUtil.mass, zDrag * attUtil.mass, p3.x, p3.y, p3.z)
+--
+--    ship.applyRotDependentForceToPos(0, yDragBase * attUtil.mass, 0, (p1.x + p3.x) / 2, p1.y, p1.z)
+--
+--    ship.applyRotDependentForceToPos(math.deg(math.asin(joyUtil.BTStick.y)) * attUtil.mass, 0, 0, p3.x, 0, 0)
+--    --applyRotDependentForce(math.deg(math.asin(joyUtil.BTStick.y)) * attUtil.mass, 0, 0)
+--
+--    --local dd = pp * 2
+--    --dd = dd * 2 > 2 and 2 or dd < 0.5 and 0.5 or dd
+--    --pdControl.rotInner(0, 0, 0, 1, dd)
+--
+--    --commands.execAsync(("say 1y=%d, 3y=%d"):format(p1w * yForceBase * yDragBase, p3w * yForceBase * yDragBase))
+--end
+
+pdControl.fixedWing = function()
+    local s = RotateVectorByQuat(getConjQuat(attUtil.quat), attUtil.velocity)
+    local vs = math.sqrt(s.x ^ 2 + s.y ^ 2 + s.x ^ 2)
+    local pp = s.x * (properties.wing.wings.size + properties.wing.tail_wings.size) / 2
+    pp = math.abs(pp) > 1 and 1 or pp
+    --计算三轴压强
+    local powX = s.x ^ 2
+    local xDrag = copysign(powX, -s.x) * 0.1
+    local yDrag = copysign((s.y * 10) ^ 2, -s.y)
+    yDrag = yDrag + yDrag * powX
+    yDrag = math.abs(yDrag) > 128 and copysign(128, yDrag) or yDrag
+    local zDrag = copysign((s.z * 10) ^ 2, -s.z)
+    zDrag = zDrag + zDrag * powX
+    zDrag = math.abs(zDrag) > 128 and copysign(128, zDrag) or zDrag
+
+    --if math.abs(yDrag) > 10 then
+    --    commands.execAsync(("say yD=%d"):format(yDrag))
+    --end
+    --commands.execAsync(("say yD=%d"):format(yDrag))
+    local p1 = properties.wing.wings.pos
+    local p1w = attUtil.wingWeight * properties.wing.wings.size
+
+    local p3 = properties.wing.tail_wings.pos
+    local p3w = attUtil.wingWeight * properties.wing.tail_wings.size
+
+    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, p1.z)
+    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, -p1.z)
+
+    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.tail_wings.size * 2 * attUtil.mass,
+        zDrag * properties.wing.tail_wings.size * attUtil.mass, p3.x, p3.y, p3.z)
+
+    --ship.applyRotDependentForceToPos(0, yDrag * (properties.wing.wings.size + properties.wing.tail_wings.size) * 2 * attUtil.mass, 0, p1.x * p1w + p3.x * p3w, 0, 0)
+
+    local dd = math.abs(pp)
+    dd = dd > 1 and 1 or dd < 0.1 and 0.1 or dd
+    pdControl.rotInner(0, 0, 0, 1, dd)
+end
+
 pdControl.helicopter = function()
     local acc
     local tgAg = {}
@@ -1451,17 +1531,37 @@ end
 pdControl.follow = function(target)
     if target then
         local pos, qPos = {}, {}
-        qPos.x = copysign(attUtil.size.x / 2, properties.followRange.x) + properties.followRange.x
-        qPos.y = copysign(attUtil.size.y / 2, properties.followRange.y) + properties.followRange.y
-        qPos.z = copysign(attUtil.size.z / 2, properties.followRange.z) + properties.followRange.z
+        local sz = RotateVectorByQuat(getConjQuat(attUtil.quat), attUtil.size)
+        sz.x = sz.x * ship.getScale().x
+        sz.y = sz.y * ship.getScale().y
+        sz.z = sz.z * ship.getScale().z
+        qPos.x = copysign(sz.x / 2, properties.followRange.x) + properties.followRange.x
+        qPos.y = copysign(sz.y / 2, properties.followRange.y) + properties.followRange.y
+        qPos.z = copysign(sz.z / 2, properties.followRange.z) + properties.followRange.z
         pos.x = target.x + qPos.x
         pos.y = target.y + qPos.y
         pos.z = target.z + qPos.z
         attUtil.tmpFlags.followLastAtt = pos
     end
 
-    pdControl.gotoPosition(
-        { roll = 0, yaw = 0, pitch = 0 }, attUtil.tmpFlags.followLastAtt, properties.MAX_MOVE_SPEED)
+    pdControl.gotoPosition(nil, attUtil.tmpFlags.followLastAtt, properties.MAX_MOVE_SPEED)
+
+    local vec = {
+        x = target.x - attUtil.position.x,
+        y = target.y + 1.75 - attUtil.position.y,
+        z = target.z - attUtil.position.z
+    }
+    local euler = {
+        roll = 0,
+        yaw = math.atan2(vec.x, vec.z),
+        pitch = math.asin(vec.y / math.sqrt(vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2))
+    }
+    local ag = euler2Quat(
+        0,
+        math.atan2(vec.x, vec.z),
+        math.asin(vec.y / math.sqrt(vec.x ^ 2 + vec.y ^ 2 + vec.z ^ 2))
+    )
+    pdControl.rotate2Euler({roll = math.deg(euler.roll), yaw = math.deg(euler.yaw), pitch = math.deg(euler.pitch)}, 2, 2.8)
 end
 
 pdControl.goHome = function()
@@ -1526,35 +1626,32 @@ pdControl.ShipCamera = function()
     end
 end
 
-local shipFollow_offset
 pdControl.ShipFollow = function()
     if parentShip.id == -1 then return end
-    if not shipFollow_offset then shipFollow_offset = { x = parentShip.size.x + 5, y = 0, z = 0 } end
-    shipFollow_offset.x = shipFollow_offset.x +
-        math.asin(joyUtil.BTStick.y) * properties.profile[properties.profileIndex].camera_move_speed
-    shipFollow_offset.z = shipFollow_offset.z +
-        math.asin(joyUtil.BTStick.x) * properties.profile[properties.profileIndex].camera_move_speed
-    shipFollow_offset.y = shipFollow_offset.y +
-        math.asin(joyUtil.LeftStick.y) * properties.profile[properties.profileIndex].camera_move_speed
-
     local pos = {
         x = parentShip.pos.x + parentShip.velocity.x,
         y = parentShip.pos.y + parentShip.velocity.y,
         z = parentShip.pos.z + parentShip.velocity.z
     }
 
-    local newPos = RotateVectorByQuat(parentShip.quat, shipFollow_offset)
+    local offsets = {
+        x = properties.shipFollow_offset.x + parentShip.size.x,
+        y = properties.shipFollow_offset.y,
+        z = properties.shipFollow_offset.z
+    }
+    local newPos = RotateVectorByQuat(parentShip.quat, offsets)
 
     pos.x = pos.x + newPos.x
     pos.y = pos.y + newPos.y
     pos.z = pos.z + newPos.z
 
-    local xRot, yRot, zRot = math.deg(math.asin(joyUtil.RightStick.x)), math.deg(math.asin(joyUtil.LeftStick.x)),
-        math.deg(math.asin(joyUtil.RightStick.y))
-    pdControl.rotInner(
-        xRot, yRot, zRot,
-        properties.profile[properties.profileIndex].spaceShip_P,
-        properties.profile[properties.profileIndex].spaceShip_D)
+    --local xRot, yRot, zRot = math.deg(math.asin(joyUtil.RightStick.x)), math.deg(math.asin(joyUtil.LeftStick.x)),
+    --    math.deg(math.asin(joyUtil.RightStick.y))
+    --pdControl.rotInner(
+    --    xRot, yRot, zRot,
+    --    properties.profile[properties.profileIndex].spaceShip_P,
+    --    properties.profile[properties.profileIndex].spaceShip_D)
+    pdControl.rotate2quat(getConjQuat(parentShip.quat), 0.9, 2.8)
     pdControl.gotoPosition(nil, pos, properties.MAX_MOVE_SPEED)
 end
 
@@ -1795,6 +1892,7 @@ local mass_fix             = setmetatable({ pageId = 21, pageName = "mass_fix" }
 local rate_Roll            = setmetatable({ pageId = 22, pageName = "rate_Roll" }, { __index = abstractWindow })
 local rate_Yaw             = setmetatable({ pageId = 23, pageName = "rate_Yaw" }, { __index = abstractWindow })
 local rate_Pitch           = setmetatable({ pageId = 24, pageName = "rate_Pitch" }, { __index = abstractWindow })
+local set_fixedWing        = setmetatable({ pageId = 25, pageName = "set_fixedWing" }, { __index = abstractWindow })
 
 flightPages                = {
     modPage,              --1
@@ -1821,6 +1919,7 @@ flightPages                = {
     rate_Roll,            --22
     rate_Yaw,             --23
     rate_Pitch,           --24
+    set_fixedWing,        --25
 }
 
 --winIndex = 1
@@ -1844,6 +1943,7 @@ function modPage:init()
         { text = modelist[10].name, x = 2,                  y = 12,              blitF = genStr(font, #modelist[10].name), blitB = genStr(bg, #modelist[10].name), modeId = 10, select = genStr(select, #modelist[10].name) },
         { text = modelist[11].name, x = 2,                  y = 13,              blitF = genStr(font, #modelist[11].name), blitB = genStr(bg, #modelist[11].name), modeId = 11, select = genStr(select, #modelist[11].name) },
         { text = modelist[12].name, x = 2,                  y = 14,              blitF = genStr(font, #modelist[12].name), blitB = genStr(bg, #modelist[12].name), modeId = 12, select = genStr(select, #modelist[12].name) },
+        { text = modelist[13].name, x = 2,                  y = 15,              blitF = genStr(font, #modelist[13].name), blitB = genStr(bg, #modelist[13].name), modeId = 13, select = genStr(select, #modelist[13].name) },
     }
     self.otherButtons = {
         { text = "      v      ", x = 2, y = self.height - 2, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
@@ -1927,7 +2027,7 @@ function modPage:onTouch(x, y)
                                 properties.lock = not properties.lock
                             end
                         else
-                            if v.modeId < 9 or v.modeId == 12 then
+                            if v.modeId < 9 or v.modeId >= 12 then
                                 properties.mode = v.modeId
                             elseif parentShip.id ~= -1 then
                                 properties.mode = v.modeId
@@ -2616,17 +2716,41 @@ function set_shipFollow:init()
         { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
         { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
         { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "rotate -    +", x = 2, y = 9, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
     }
 end
 
 function set_shipFollow:refresh()
     self:refreshButtons()
     self:refreshTitle()
+    local sp = split(
+        string.format("%d, %d, %d", properties.shipFollow_offset.x, properties.shipFollow_offset.y,
+            properties.shipFollow_offset.z), ", ")
+    local sX, sY, sZ = sp[1], sp[2], sp[3]
+    self.window.setCursorPos(11, self.buttons[2].y)
+    self.window.blit(string.format("%d", sX), genStr(properties.font, #sX), genStr(properties.bg, #sX))
+    self.window.setCursorPos(11, self.buttons[3].y)
+    self.window.blit(string.format("%d", sY), genStr(properties.font, #sY), genStr(properties.bg, #sY))
+    self.window.setCursorPos(11, self.buttons[4].y)
+    self.window.blit(string.format("%d", sZ), genStr(properties.font, #sZ), genStr(properties.bg, #sZ))
 end
 
 function set_shipFollow:onTouch(x, y)
     self:subPage_Back(x, y)
+    if y >= self.buttons[2].y and y <= self.buttons[4].y then
+        local result = 0
+        if x == 9 then
+            result = -1
+        elseif x == 14 then
+            result = 1
+        end
+        if y == self.buttons[2].y then
+            properties.shipFollow_offset.x = properties.shipFollow_offset.x + result
+        elseif y == self.buttons[3].y then
+            properties.shipFollow_offset.y = properties.shipFollow_offset.y + result
+        elseif y == self.buttons[4].y then
+            properties.shipFollow_offset.z = properties.shipFollow_offset.z + result
+        end
+    end
 end
 
 --winIndex = 20
@@ -2811,15 +2935,16 @@ function setPage:init()
         { text = "<    SET    >", x = self.width / 2 - 5, y = 1,       blitF = genStr(title, 13), blitB = genStr(bg, 13) },
         { text = "S_SpaceShip",   x = 2,                  pageId = 6,  y = 3,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "S_QuadFPV  ",   x = 2,                  pageId = 7,  y = 4,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_Helicopt ",   x = 2,                  pageId = 8,  y = 5,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_aitShip  ",   x = 2,                  pageId = 9,  y = 6,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "User_Change",   x = 2,                  pageId = 10, y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Home_Set   ",   x = 2,                  pageId = 11, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Simulate   ",   x = 2,                  pageId = 12, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Profile    ",   x = 2,                  pageId = 14, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "MassFix",       x = 2,                  pageId = 21, y = 13,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
+        { text = "S_FixedWing",   x = 2,                  pageId = 25, y = 5,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_Helicopt ",   x = 2,                  pageId = 8,  y = 6,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_aitShip  ",   x = 2,                  pageId = 9,  y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "User_Change",   x = 2,                  pageId = 10, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Home_Set   ",   x = 2,                  pageId = 11, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Simulate   ",   x = 2,                  pageId = 12, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Profile    ",   x = 2,                  pageId = 14, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 13,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "MassFix",       x = 2,                  pageId = 21, y = 14,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
     }
     self.otherButtons = {
         { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
@@ -3049,6 +3174,90 @@ function set_quadFPV:onTouch(x, y)
             else
                 v.selected = false
             end
+        end
+    end
+end
+
+--winIndex = 25
+function set_fixedWing:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 5
+    self.buttons = {
+        { text = "< wingOffset",   x = 1, y = 2, blitF = genStr(title, 12),             blitB = genStr(bg, 12) },
+        { text = "Wing:-   +",     x = 1, y = 3, blitF = genStr(font, 5) .. "fffff",    blitB = genStr(bg, 5) .. "b" .. "fff" .. "e" },
+        { text = "wSize:--    ++", x = 1, y = 4, blitF = genStr(font, 6) .. "ffffffff", blitB = genStr(bg, 6) .. "b5" .. "ffff" .. "1e" },
+        { text = "Tail:-   +",     x = 1, y = 5, blitF = genStr(font, 5) .. "fffff",    blitB = genStr(bg, 5) .. "b" .. "fff" .. "e" },
+        { text = "tSize:--    ++", x = 1, y = 6, blitF = genStr(font, 6) .. "ffffffff", blitB = genStr(bg, 6) .. "b5" .. "ffff" .. "1e" },
+        { text = "vertTail:-   +", x = 1, y = 7, blitF = genStr(font, 9) .. "fffff",    blitB = genStr(bg, 9) .. "b" .. "fff" .. "e" },
+        { text = "vSize:--    ++", x = 1, y = 8, blitF = genStr(font, 6) .. "ffffffff", blitB = genStr(bg, 6) .. "b5" .. "ffff" .. "1e" },
+    }
+end
+
+function set_fixedWing:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    self.window.setCursorPos(7, 3)
+    self.window.write(math.floor(properties.wing.wings.pos.x + 0.5))
+    self.window.setCursorPos(9, 4)
+    self.window.write(string.format("%0.2f", properties.wing.wings.size))
+    self.window.setCursorPos(7, 5)
+    self.window.write(math.floor(properties.wing.tail_wings.pos.x + 0.5))
+    self.window.setCursorPos(9, 6)
+    self.window.write(string.format("%0.2f", properties.wing.tail_wings.size))
+    self.window.setCursorPos(11, 7)
+    self.window.write(math.floor(properties.wing.verticalTail.pos.x + 0.5))
+    self.window.setCursorPos(9, 8)
+    self.window.write(string.format("%0.2f", properties.wing.verticalTail.size))
+end
+
+function set_fixedWing:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if y == 3 or y == 5 or y == 7 then
+        local result = 0
+        if y < 7 then
+            if x == 6 then
+                result = -1
+            elseif x == 10 then
+                result = 1
+            end
+        else
+            if x == 10 then
+                result = -1
+            elseif x == 14 then
+                result = 1
+            end
+        end
+
+        if y == 3 then
+            properties.wing.wings.pos.x = properties.wing.wings.pos.x + result
+        elseif y == 5 then
+            properties.wing.tail_wings.pos.x = properties.wing.tail_wings.pos.x + result
+        elseif y == 7 then
+            properties.wing.verticalTail.pos.x = properties.wing.verticalTail.pos.x + result
+        end
+    elseif y == 4 or y == 6 or y == 8 then
+        local result = 0
+        if x == 7 then
+            result = -0.1
+        elseif x == 8 then
+            result = -0.01
+        elseif x == 13 then
+            result = 0.01
+        elseif x == 14 then
+            result = 0.1
+        end
+        if y == 4 then
+            properties.wing.wings.size = properties.wing.wings.size + result
+            properties.wing.wings.size = properties.wing.wings.size < 0.01 and 0.01 or properties.wing.wings.size
+        elseif y == 6 then
+            properties.wing.tail_wings.size = properties.wing.tail_wings.size + result
+            properties.wing.tail_wings.size = properties.wing.tail_wings.size < 0.01 and 0.01 or
+                properties.wing.tail_wings.size
+        elseif y == 8 then
+            properties.wing.verticalTail.size = properties.wing.verticalTail.size + result
+            properties.wing.verticalTail.size = properties.wing.verticalTail.size < 0.01 and 0.01 or
+                properties.wing.verticalTail.size
         end
     end
 end
@@ -4341,6 +4550,8 @@ function flightUpdate()
             pdControl.anchorage()
         elseif properties.mode == 12 then
             pdControl.spaceFpv()
+        elseif properties.mode == 13 then
+            pdControl.fixedWing()
         end
         --commands.execAsync(("say %0.2f"):format(attUtil.velocity.x))
         --genWakeFlow()
