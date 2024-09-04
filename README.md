@@ -11,6 +11,10 @@
 > 特别感谢：
 @kallen 提供的metaphysics mod ： 飞控的玩家扫描器、射线检测（方块扫描器）使用了此mod提供的API
 感谢 @kallen 因我的需求增加mod功能
+
+### 物理帧模式抓取虚空动力的引擎控制器的物理帧事件：
+> https://github.com/dfdyz/VoidPowerMod/tree/main
+
 > 
 ### 更新日志：
 * 2024/4/05 增加多旋翼模式（quadRotor）：姿态模式、定点模式
