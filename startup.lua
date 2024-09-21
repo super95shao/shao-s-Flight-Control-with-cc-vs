@@ -1,3 +1,14 @@
+--[[ if not ship then
+    if term.isColor() then term.setTextColor(colors.red) end
+    print("ShipAPI unavailable. Either this computer is not on a ship, or CC-VS is not installed.")
+    return
+end
+if not ship.setStatic then
+    if term.isColor() then term.setTextColor(colors.red) end
+    print(
+        "ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
+    return
+end ]]
 peripheral.find("modem", rednet.open)
 ---------inner---------
 local modelist = {
@@ -803,7 +814,8 @@ attUtil.getAttWithCCTick = function()
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
-    attUtil.getOmega(attUtil.pX, attUtil.pY, attUtil.pZ)
+    --attUtil.getOmega(attUtil.pX, attUtil.pY, attUtil.pZ)
+    attUtil.omega = RotateVectorByQuat(attUtil.conjQuat, ship.getOmega())
     attUtil.velocity.x = ship.getVelocity().x / 20
     attUtil.velocity.y = ship.getVelocity().y / 20
     attUtil.velocity.z = ship.getVelocity().z / 20
@@ -829,7 +841,7 @@ attUtil.getAttWithPhysTick = function()
     attUtil.pX = RotateVectorByQuat(attUtil.quat, { x = 1, y = 0, z = 0 })
     attUtil.pY = RotateVectorByQuat(attUtil.quat, { x = 0, y = 1, z = 0 })
     attUtil.pZ = RotateVectorByQuat(attUtil.quat, { x = 0, y = 0, z = -1 })
-    attUtil.getOmega(attUtil.pX, attUtil.pY, attUtil.pZ)
+    attUtil.omega = RotateVectorByQuat(attUtil.conjQuat, attUtil.poseVel.omega)
     attUtil.velocity.x = attUtil.poseVel.velocity.x / 60
     attUtil.velocity.y = attUtil.poseVel.velocity.y / 60
     attUtil.velocity.z = attUtil.poseVel.velocity.z / 60
@@ -1317,85 +1329,47 @@ pdControl.spaceFpv = function()
     pdControl.quatRot(xRot, yRot, zRot)
 end
 
---pdControl.fixedWing = function()
---    local s = RotateVectorByQuat(attUtil.quat, attUtil.velocity)
---    local worldForce = { x = 0, y = 0, z = 0 }
---    local maxLen = math.max(attUtil.size.x, attUtil.size.z) * ship.getScale().x
---    local pp = s.x * (properties.wing.wings.size + properties.wing.tail_wings.size) / 2
---    pp = pp > 1 and 1 or pp
---
---    local powX = s.x ^ 2
---    local xDrag = copysign(powX, -s.x) * 0.1
---    local yDragBase = copysign(s.y ^ 2, -s.y) * (properties.wing.wings.size + properties.wing.tail_wings.size) * 20
---    yDragBase = yDragBase + yDragBase * powX
---    local zDrag = copysign(s.z ^ 2, -s.z) * properties.wing.verticalTail.size * 20
---    zDrag = zDrag + zDrag * powX
---
---    local yForceBase = math.abs(math.cos(attUtil.pX.y) * math.cos(attUtil.pZ.y))
---    worldForce.y = 1
---    local p1 = properties.wing.wings.pos
---    local p1w = attUtil.wingWeight * properties.wing.wings.size
---    local p1Force = p1w * yForceBase * pdControl.basicYSpeed * pp + pp * p1w * math.deg(math.asin(joyUtil.LeftStick.y))
---    local p1Rot = pp * p1w * math.deg(math.asin(joyUtil.RightStick.x))
---    --math.asin(joyUtil.LeftStick.y)
---
---    local p3 = properties.wing.tail_wings.pos
---    local p3w = attUtil.wingWeight * properties.wing.tail_wings.size
---    local p3Force = p3w * yForceBase * pdControl.basicYSpeed * pp + pp * p3w * -math.deg(math.asin(joyUtil.LeftStick.y))
---
---    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, (p1Rot + p1Force) * attUtil.mass, 0, p1.x, p1.y, p1.z)
---    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, (-p1Rot + p1Force )* attUtil.mass, 0, p1.x, p1.y, -p1.z)
---
---    ship.applyRotDependentForceToPos(xDrag * attUtil.mass, p3Force * 2 * attUtil.mass, zDrag * attUtil.mass, p3.x, p3.y, p3.z)
---
---    ship.applyRotDependentForceToPos(0, yDragBase * attUtil.mass, 0, (p1.x + p3.x) / 2, p1.y, p1.z)
---
---    ship.applyRotDependentForceToPos(math.deg(math.asin(joyUtil.BTStick.y)) * attUtil.mass, 0, 0, p3.x, 0, 0)
---    --applyRotDependentForce(math.deg(math.asin(joyUtil.BTStick.y)) * attUtil.mass, 0, 0)
---
---    --local dd = pp * 2
---    --dd = dd * 2 > 2 and 2 or dd < 0.5 and 0.5 or dd
---    --pdControl.rotInner(0, 0, 0, 1, dd)
---
---    --commands.execAsync(("say 1y=%d, 3y=%d"):format(p1w * yForceBase * yDragBase, p3w * yForceBase * yDragBase))
---end
-
 pdControl.fixedWing = function()
     local s = RotateVectorByQuat(getConjQuat(attUtil.quat), attUtil.velocity)
-    local vs = math.sqrt(s.x ^ 2 + s.y ^ 2 + s.x ^ 2)
-    local pp = s.x * (properties.wing.wings.size + properties.wing.tail_wings.size) / 2
-    pp = math.abs(pp) > 1 and 1 or pp
     --计算三轴压强
-    local powX = s.x ^ 2
-    local xDrag = copysign(powX, -s.x) * 0.1
-    local yDrag = copysign((s.y * 10) ^ 2, -s.y)
+    --local powX = s.x ^ 2
+    local powX = 0
+    local xDrag = copysign(powX, -s.x) * 0.01
+    local yDrag = copysign((s.y * 2) ^ 2, -s.y)
     yDrag = yDrag + yDrag * powX
     yDrag = math.abs(yDrag) > 128 and copysign(128, yDrag) or yDrag
-    local zDrag = copysign((s.z * 10) ^ 2, -s.z)
+    local zDrag = copysign((s.z * 2) ^ 2, -s.z)
     zDrag = zDrag + zDrag * powX
     zDrag = math.abs(zDrag) > 128 and copysign(128, zDrag) or zDrag
 
-    --if math.abs(yDrag) > 10 then
-    --    commands.execAsync(("say yD=%d"):format(yDrag))
-    --end
-    --commands.execAsync(("say yD=%d"):format(yDrag))
     local p1 = properties.wing.wings.pos
     local p1w = attUtil.wingWeight * properties.wing.wings.size
 
     local p3 = properties.wing.tail_wings.pos
     local p3w = attUtil.wingWeight * properties.wing.tail_wings.size
 
-    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, p1.z)
-    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, -p1.z)
+    local xRotDrag = copysign(attUtil.omega.x ^ 2 * p1.z, attUtil.omega.x) --roll
+    xRotDrag = xRotDrag + xRotDrag * powX
+    local yRotDrag = copysign(attUtil.omega.y ^ 2 * properties.wing.verticalTail.pos.x, attUtil.omega.y) --yaw
+    yRotDrag = yRotDrag + yRotDrag * powX
+    local zRotD_All = attUtil.omega.z ^ 2
+    local zRotDrag_1 = copysign(zRotD_All * p1.x, -attUtil.omega.z) --pitch
+    zRotDrag_1 = zRotDrag_1 + zRotDrag_1 * powX
+    local zRotDrag_2 = copysign(zRotD_All * p3.x, -attUtil.omega.z) --pitch
+    zRotDrag_2 = zRotDrag_2 + zRotDrag_2 * powX
 
-    ship.applyRotDependentForceToPos(0, yDrag * properties.wing.tail_wings.size * 2 * attUtil.mass,
-        zDrag * properties.wing.tail_wings.size * attUtil.mass, p3.x, p3.y, p3.z)
+    xRotDrag = math.abs(xRotDrag) > 128 and copysign(128, xRotDrag) or xRotDrag
+    yRotDrag = math.abs(yRotDrag) > 128 and copysign(128, yRotDrag) or yRotDrag
+    zRotDrag_1 = math.abs(zRotDrag_1) > 128 and copysign(128, zRotDrag_1) or zRotDrag_1
+    zRotDrag_2 = math.abs(zRotDrag_2) > 128 and copysign(128, zRotDrag_2) or zRotDrag_2
 
-    --ship.applyRotDependentForceToPos(0, yDrag * (properties.wing.wings.size + properties.wing.tail_wings.size) * 2 * attUtil.mass, 0, p1.x * p1w + p3.x * p3w, 0, 0)
+    ship.applyRotDependentForceToPos(0, (yDrag + xRotDrag + zRotDrag_1 / 2) * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, p1.z)
+    ship.applyRotDependentForceToPos(0, (yDrag - xRotDrag + zRotDrag_1 / 2) * properties.wing.wings.size * attUtil.mass, 0, p1.x, p1.y, -p1.z)
 
-    local dd = math.abs(pp)
-    dd = dd > 1 and 1 or dd < 0.1 and 0.1 or dd
-    pdControl.rotInner(0, 0, 0, 1, dd)
+    ship.applyRotDependentForceToPos(0, (yDrag + zRotDrag_2) * properties.wing.tail_wings.size * 2 * attUtil.mass,
+        (zDrag + yRotDrag) * properties.wing.tail_wings.size * attUtil.mass, p3.x, p3.y, p3.z)
+
+    xDrag = xDrag * (attUtil.size.z * attUtil.size.y)
 end
 
 pdControl.helicopter = function()
@@ -1489,20 +1463,39 @@ pdControl.gotoPositionWithPD = function(euler, pos1, pos2, maxSpeed, p, p2, d)
 end
 
 pdControl.HmsSpaceBasedGun = function()
-    local targetAngle = scanner.getRCAngle(properties.rayCasterRange)
-    targetAngle.roll = 0
-    targetAngle.cosPitch = math.cos(math.rad(-attUtil.eulerAngle.pitch))
-    targetAngle.y = math.sin(math.rad(-attUtil.eulerAngle.pitch))
-    targetAngle.x = -math.cos(math.rad(attUtil.eulerAngle.yaw)) * targetAngle.cosPitch
-    targetAngle.z = math.sin(math.rad(attUtil.eulerAngle.yaw)) * targetAngle.cosPitch
-    local tg = rayCaster.run(attUtil.position, targetAngle, targetAngle.distance, true)
-    if timeUtil.SpaceBasedGunCd > 20 then
-        timeUtil.SpaceBasedGunCd = 0
-        genParticleBomm(tg.x, tg.y, tg.z)
-        rayCaster.runShoot(attUtil.position, targetAngle, targetAngle.distance, true)
-    else
-        timeUtil.SpaceBasedGunCd = timeUtil.SpaceBasedGunCd + 1
-    end
+    local block =
+        rayCaster.run(
+            scanner.commander,
+            {
+                x = scanner.commander.raw_euler_x,
+                y = scanner.commander.raw_euler_y,
+                z = scanner.commander.raw_euler_z
+            },
+            properties.rayCasterRange,
+            false
+        )
+    local pos = {}
+    pos.x = attUtil.position.x - block.x
+    pos.y = -(attUtil.position.y - block.y)
+    pos.z = attUtil.position.z - block.z
+
+    local tmpPos = RotateVectorByQuat(quatMultiply(attUtil.conjQuat, attUtil.quatList[properties.shipFace]), pos)
+
+    local add = math.sqrt(tmpPos.x ^ 2 + tmpPos.y ^ 2 + tmpPos.z ^ 2)
+
+            local yRot = math.deg(math.atan2(tmpPos.z, -tmpPos.x))
+            local zRot = -math.deg(math.asin(tmpPos.y / add))
+
+    pdControl.rotInner(-attUtil.eulerAngle.roll, yRot, zRot, 1, 2.32)
+    
+    --local tg = rayCaster.run(attUtil.position, targetAngle, targetAngle.distance, true)
+    --if timeUtil.SpaceBasedGunCd > 20 then
+    --    timeUtil.SpaceBasedGunCd = 0
+    --    genParticleBomm(tg.x, tg.y, tg.z)
+    --    rayCaster.runShoot(attUtil.position, targetAngle, targetAngle.distance, true)
+    --else
+    --    timeUtil.SpaceBasedGunCd = timeUtil.SpaceBasedGunCd + 1
+    --end
 
     pdControl.gotoPosition(
         { roll = 0, yaw = targetAngle.yaw, pitch = targetAngle.pitch },
@@ -1511,15 +1504,26 @@ pdControl.HmsSpaceBasedGun = function()
 end
 
 pdControl.followMouse = function()
+    local xRot, yRot, zRot = 0, 0, 0
     if joyUtil.flag then
         if joyUtil.joy.hasUser() then
-            attUtil.tmpFlags.hmsLastAtt = scanner.commander
+            local vec = {
+                x = scanner.commander.raw_euler_x,
+                z = scanner.commander.raw_euler_z,
+                y = scanner.commander.raw_euler_y
+            }
+            
+            vec = RotateVectorByQuat(getConjQuat(attUtil.quat), vec)
+            xRot = -attUtil.eulerAngle.roll
+            yRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
+            zRot = -math.deg(math.asin(vec.y))
+            --xRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
+            --yRot = 0
+            --zRot = -math.deg(math.asin(vec.y))
         end
     end
-    attUtil.tmpFlags.hmsLastAtt = scanner.commander
-    pdControl.rotate2Euler2(attUtil.tmpFlags.hmsLastAtt, properties.profile[properties.profileIndex].spaceShip_P,
-        properties.profile[properties.profileIndex].spaceShip_D)
-
+    
+    pdControl.rotInner(xRot, yRot, zRot, 1, 2.32)
     pdControl.moveWithRot(
         math.deg(math.asin(joyUtil.BTStick.y)),
         math.deg(math.asin(joyUtil.LeftStick.y)),
@@ -2937,7 +2941,7 @@ function setPage:init()
         { text = "S_QuadFPV  ",   x = 2,                  pageId = 7,  y = 4,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "S_FixedWing",   x = 2,                  pageId = 25, y = 5,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "S_Helicopt ",   x = 2,                  pageId = 8,  y = 6,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "S_aitShip  ",   x = 2,                  pageId = 9,  y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "S_airShip  ",   x = 2,                  pageId = 9,  y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "User_Change",   x = 2,                  pageId = 10, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Home_Set   ",   x = 2,                  pageId = 11, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Simulate   ",   x = 2,                  pageId = 12, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
