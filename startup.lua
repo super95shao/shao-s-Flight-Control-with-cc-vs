@@ -391,7 +391,7 @@ local quat2Euler = function(quat)
     local LPoint = RotateVectorByQuat(quat, { x = 0, y = 0, z = -1 })
     local TopPoint = RotateVectorByQuat(quat, { x = 0, y = 1, z = 0 })
     local ag = {}
-    ag.pitch = math.deg(math.atan2(FPoint.y, copysign(math.sqrt(FPoint.x ^ 2 + FPoint.z ^ 2), TopPoint.y)))
+    ag.pitch = math.deg(math.asin(FPoint.y))
     ag.yaw = math.deg(math.atan2(-FPoint.z, FPoint.x))
     ag.roll = math.deg(math.asin(LPoint.y))
     if math.abs(ag.pitch) > 80 then
@@ -850,19 +850,6 @@ attUtil.getAttWithPhysTick = function()
     --commands.execAsync(("say w=%df, x=%df"):format(attUtil.quat.w * 1000, attUtil.quat.x * 1000))
 end
 
-attUtil.getOmega = function(xp, yp, zp)
-    local XPoint = { x = xp.x, y = xp.y, z = xp.z }
-    local ZPoint = { x = zp.x, y = zp.y, z = zp.z }
-    attUtil.preQuat.x = -attUtil.preQuat.x
-    attUtil.preQuat.y = -attUtil.preQuat.y
-    attUtil.preQuat.z = -attUtil.preQuat.z
-    XPoint = RotateVectorByQuat(attUtil.preQuat, XPoint)
-    ZPoint = RotateVectorByQuat(attUtil.preQuat, ZPoint)
-    attUtil.omega.x = math.deg(math.asin(ZPoint.y))
-    attUtil.omega.z = math.deg(math.asin(XPoint.y))
-    attUtil.omega.y = math.deg(math.atan2(-XPoint.z, XPoint.x))
-end
-
 attUtil.setPreAtt = function()
     attUtil.prePos         = attUtil.position
     attUtil.preQuat        = attUtil.quat
@@ -1067,9 +1054,15 @@ pdControl.moveWithRot = function(xVal, yVal, zVal, p, d, sidemove_p)
 
     if sidemove_p then
         sidemove_p = sidemove_p * pdControl.move_P_multiply
-        applyRotDependentForce(xVal * p * attUtil.mass,
-            yVal * p * attUtil.mass,
-            zVal * sidemove_p * attUtil.mass)
+        
+        if properties.shipFace == "north" or properties.shipFace == "south" then
+            xVal, yVal, zVal = xVal * sidemove_p, yVal * p, zVal * p
+        else
+            xVal, yVal, zVal = xVal * p, yVal * p, zVal * sidemove_p
+        end
+        applyRotDependentForce(xVal * attUtil.mass,
+            yVal * attUtil.mass,
+            zVal * attUtil.mass)
     else
         applyRotDependentForce(xVal * p * attUtil.mass,
             yVal * p * attUtil.mass,
@@ -1138,38 +1131,19 @@ pdControl.rotate2Euler = function(euler, p, d)
 end
 
 pdControl.rotate2Euler2 = function(euler, p, d)
-    local x_c = math.cos(math.rad(euler.pitch))
-    local tmpx = {
-        x = math.cos(math.rad(euler.yaw)) * x_c,
-        y = math.sin(math.rad(euler.pitch)),
-        z = -math.sin(math.rad(euler.yaw)) * x_c
-    }
-    local z_c = math.cos(math.rad(euler.roll))
-    local tmpz = {
-        x = math.sin(math.rad(euler.yaw)) * z_c,
-        y = math.sin(math.rad(euler.roll)),
-        z = -math.cos(math.rad(euler.yaw)) * z_c
+    local force = {
+        x = resetAngelRange(euler.roll - attUtil.eulerAngle.roll),
+        y = resetAngelRange(euler.yaw - attUtil.eulerAngle.yaw),
+        z = resetAngelRange(euler.pitch - attUtil.eulerAngle.pitch),
     }
 
-    local troll = math.atan2(attUtil.pZ.y, copysign(math.sqrt(attUtil.pZ.x ^ 2 + attUtil.pZ.z ^ 2), attUtil.pY.y))
-    local tyaw = math.atan2(attUtil.pX.x, attUtil.pX.z)
-    local tpitch = math.atan2(attUtil.pX.y, copysign(math.sqrt(attUtil.pX.x ^ 2 + attUtil.pX.z ^ 2), attUtil.pY.y))
-    if attUtil.pY.y < 0 then --超过180°优先旋转最快的 避免多轴重复旋转
-        tyaw = 0
-        if math.abs(troll) > math.abs(tpitch) then
-            troll = 0
-        else
-            tpitch = 0
-        end
-    end
-    local xRot = math.deg(math.asin(tmpz.y) - troll)
-    local yRot = resetAngelRange(math.deg(math.atan2(tmpx.x, tmpx.z) - tyaw))
-    local zRot = math.deg(math.asin(tmpx.y) - tpitch)
+    force = RotateVectorByQuat(attUtil.conjQuat, force)
 
-    pdControl.rotInner(xRot, yRot, zRot, p, d)
+    pdControl.rotInner(force.x, force.y, force.z, p, 9)
 end
 
 pdControl.rotate2quat = function(q, p, d)
+    q = getConjQuat(q)
     local tgQ = quatMultiply(q, attUtil.quat)
     local xPoint, zPoint
     xPoint = RotateVectorByQuat(tgQ, { x = -1, y = 0, z = 0 })
@@ -1182,9 +1156,10 @@ end
 
 pdControl.spaceShip = function()
     if properties.lock then
-        if next(attUtil.tmpFlags.lastEuler) == nil then attUtil.setLastPos() end
+        if next(attUtil.tmpFlags.quat) == nil then attUtil.setLastPos() end
         if next(attUtil.tmpFlags.lastPos) == nil then attUtil.setLastPos() end
-        pdControl.gotoPosition(attUtil.tmpFlags.lastEuler, attUtil.tmpFlags.lastPos, properties.MAX_MOVE_SPEED)
+        pdControl.rotate2quat(attUtil.tmpFlags.quat, 0.9, 9)
+        pdControl.gotoPosition(nil, attUtil.tmpFlags.lastPos, properties.MAX_MOVE_SPEED)
     else
         local forward, up, sideMove = math.deg(math.asin(joyUtil.BTStick.y)), math.deg(math.asin(joyUtil.LeftStick.y)),
             math.deg(math.asin(joyUtil.BTStick.x))
@@ -1458,7 +1433,7 @@ pdControl.gotoPositionWithPD = function(euler, pos1, pos2, maxSpeed, p, p2, d)
         euler.roll  = resetAngelRange(euler.roll)
         euler.yaw   = resetAngelRange(euler.yaw)
         euler.pitch = resetAngelRange(euler.pitch)
-        pdControl.rotate2Euler2(euler, 0.9, 2.8)
+        pdControl.rotate2Euler2(euler, 0.5, 2.8)
     end
 end
 
@@ -1487,15 +1462,6 @@ pdControl.HmsSpaceBasedGun = function()
             local zRot = -math.deg(math.asin(tmpPos.y / add))
 
     pdControl.rotInner(-attUtil.eulerAngle.roll, yRot, zRot, 1, 2.32)
-    
-    --local tg = rayCaster.run(attUtil.position, targetAngle, targetAngle.distance, true)
-    --if timeUtil.SpaceBasedGunCd > 20 then
-    --    timeUtil.SpaceBasedGunCd = 0
-    --    genParticleBomm(tg.x, tg.y, tg.z)
-    --    rayCaster.runShoot(attUtil.position, targetAngle, targetAngle.distance, true)
-    --else
-    --    timeUtil.SpaceBasedGunCd = timeUtil.SpaceBasedGunCd + 1
-    --end
 
     pdControl.gotoPosition(
         { roll = 0, yaw = targetAngle.yaw, pitch = targetAngle.pitch },
@@ -1513,17 +1479,18 @@ pdControl.followMouse = function()
                 y = scanner.commander.raw_euler_y
             }
             
-            vec = RotateVectorByQuat(getConjQuat(attUtil.quat), vec)
-            xRot = -attUtil.eulerAngle.roll
+            vec = RotateVectorByQuat(quatMultiply(attUtil.conjQuat, attUtil.quatList[properties.shipFace]), vec)
+            xRot = math.deg(math.asin(joyUtil.RightStick.x))
             yRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
-            zRot = -math.deg(math.asin(vec.y))
+            zRot = math.deg(math.asin(vec.y))
             --xRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
             --yRot = 0
             --zRot = -math.deg(math.asin(vec.y))
         end
     end
     
-    pdControl.rotInner(xRot, yRot, zRot, 1, 2.32)
+    pdControl.rotInner(xRot, yRot, zRot, properties.profile[properties.profileIndex].spaceShip_P,
+        properties.profile[properties.profileIndex].spaceShip_D)
     pdControl.moveWithRot(
         math.deg(math.asin(joyUtil.BTStick.y)),
         math.deg(math.asin(joyUtil.LeftStick.y)),
@@ -1625,7 +1592,7 @@ pdControl.ShipCamera = function()
         pos.x = pos.x + range.x
         pos.y = pos.y + range.y
         pos.z = pos.z + range.z
-        pdControl.rotate2quat(getConjQuat(cameraQuat), 0.9, 2.8)
+        pdControl.rotate2quat(cameraQuat, 0.9, 2.8)
         pdControl.gotoPosition(nil, pos, properties.MAX_MOVE_SPEED)
     end
 end
@@ -1655,7 +1622,7 @@ pdControl.ShipFollow = function()
     --    xRot, yRot, zRot,
     --    properties.profile[properties.profileIndex].spaceShip_P,
     --    properties.profile[properties.profileIndex].spaceShip_D)
-    pdControl.rotate2quat(getConjQuat(parentShip.quat), 0.9, 2.8)
+    pdControl.rotate2quat(parentShip.quat, 0.9, 2.8)
     pdControl.gotoPosition(nil, pos, properties.MAX_MOVE_SPEED)
 end
 
@@ -1736,7 +1703,7 @@ pdControl.anchorage = function()
             pdControl.gotoPositionWithPD(tgAg, pcPos, targetPos[2], maxSpeed, 3, 3.6, 2)
         end
     else
-        pdControl.rotate2quat(getConjQuat(parentShip.quat), 0.36, 2.8)
+        pdControl.rotate2quat(parentShip.quat, 0.36, 2.8)
         pdControl.gotoPositionWithPD(nil, pcPos, targetPos[1], 9, 3, 3.6, 6)
     end
 end
