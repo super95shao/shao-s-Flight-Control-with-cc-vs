@@ -103,15 +103,15 @@ system.reset = function()
         },
         enabledMonitors = enabledMonitors,
         winIndex = {},
-        profileIndex = "joyStick",
+        profileIndex = "keyboard",
         raderRange = 1,
         coupled = true,
         profile = {
             keyboard = {
-                spaceShip_P = 0.05,       --角速度比例, 决定转向快慢
-                spaceShip_D = 0.32,       --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
-                spaceShip_Acc = 0.5,      --星舰模式油门速度
-                spaceShip_SideMove = 0.5, --星舰模式横移速度
+                spaceShip_P = 0.1,       --角速度比例, 决定转向快慢
+                spaceShip_D = 0.52,       --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_Acc = 0.4,      --星舰模式油门速度
+                spaceShip_SideMove = 0.2, --星舰模式横移速度
                 spaceShip_Burner = 3.0,   --星舰模式加力燃烧倍率
                 spaceShip_move_D = 0.5,   --移动阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下、且停下时不会抖动
                 roll_rc_rate = 1.1,
@@ -593,19 +593,19 @@ local getWorldOffsetOfPcPos = function(v)
 end
 
 local applyInvariantForce = function(x, y, z)
-    InvariantForce = x + y + z
+    InvariantForce = math.abs(x) + math.abs(y) + math.abs(z)
     --commands.execAsync(("say iForce = %d"):format(InvariantForce))
     ship.applyInvariantForce(x, y, z)
 end
 
 local applyRotDependentForce = function(x, y, z)
-    RotDependentForce = x + y + z
+    RotDependentForce = math.abs(x) + math.abs(y) + math.abs(z)
     --commands.execAsync(("say rotForce = %d"):format(RotDependentForce))
     ship.applyRotDependentForce(x, y, z)
 end
 
 local applyRotDependentTorque = function(x, y, z)
-    RotDependentTorque = x + y + z
+    RotDependentTorque = math.abs(x) + math.abs(y) + math.abs(z)
     --commands.execAsync(("say rotTorque = %d"):format(RotDependentTorque))
     ship.applyRotDependentTorque(x, y, z)
 end
@@ -1076,7 +1076,7 @@ pdControl.quadUp = function(yVal, p, d, hov)
     if hov then
         local omegaApplyRot = RotateVectorByQuat(attUtil.quat, { x = 0, y = attUtil.velocity.y, z = 0 })
         pdControl.ySpeed = yVal * p +
-            pdControl.basicYSpeed * (-properties.gravity + 1) + -omegaApplyRot.y * d
+            pdControl.basicYSpeed + -omegaApplyRot.y * d
     else
         pdControl.ySpeed = yVal * p
     end
@@ -1181,8 +1181,6 @@ pdControl.spaceShip = function()
 end
 
 pdControl.quatRot = function(xRot, yRot, zRot)
-    --commands.execAsync(string.format("say input = %d omega = %d", xRot, RotateVectorByQuat(getConjQuat(attUtil.quatList[properties.shipFace]), attUtil.poseVel.omega).x * 20))
-    --commands.execAsync(string.format("say input = %d omega = %d", xRot, attUtil.omega.x * 60))
     pdControl.xSpeed = (attUtil.omega.x + xRot) * pdControl.quadFpv_P + -attUtil.omega.x * pdControl.quadFpv_D
     pdControl.ySpeed = (attUtil.omega.y + yRot) * pdControl.quadFpv_P + -attUtil.omega.y * pdControl.quadFpv_D
     pdControl.zSpeed = (attUtil.omega.z + zRot) * pdControl.quadFpv_P + -attUtil.omega.z * pdControl.quadFpv_D
@@ -1382,7 +1380,7 @@ pdControl.helicopter = function()
         properties.profile[properties.profileIndex].helicopt_ACC_D,
         true)
 
-    pdControl.rotate2Euler2(
+    pdControl.rotate2Euler(
         tgAg,
         0.5 * properties.profile[properties.profileIndex].helicopt_ROT_P * pdControl.helicopt_P_multiply,
         properties.profile[properties.profileIndex].helicopt_ROT_D / pdControl.rot_D_multiply
@@ -1473,28 +1471,56 @@ pdControl.followMouse = function()
     local xRot, yRot, zRot = 0, 0, 0
     if joyUtil.flag then
         if joyUtil.joy.hasUser() then
-            local vec = {
-                x = scanner.commander.raw_euler_x,
-                z = scanner.commander.raw_euler_z,
-                y = scanner.commander.raw_euler_y
-            }
+            local startPoint = scanner.commander
+            startPoint.y = startPoint.y
+            local block = rayCaster.run(
+                startPoint,
+                {
+                    x = scanner.commander.raw_euler_x,
+                    y = scanner.commander.raw_euler_y,
+                    z = scanner.commander.raw_euler_z
+                },
+                8,
+                false
+            )
+            --genParticle(block.x, block.y, block.z)
+            local pos = {}
+            pos.x = startPoint.x - block.x
+            pos.y = startPoint.y - block.y
+            pos.z = startPoint.z - block.z
             
-            vec = RotateVectorByQuat(quatMultiply(attUtil.conjQuat, attUtil.quatList[properties.shipFace]), vec)
+            pos = RotateVectorByQuat(quatMultiply(attUtil.conjQuat, attUtil.quatList["west"]), pos)
             xRot = math.deg(math.asin(joyUtil.RightStick.x))
-            yRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
-            zRot = math.deg(math.asin(vec.y))
+            yRot = resetAngelRange(math.deg(math.atan2(-pos.z, pos.x)) + 180)
+
+            local add = math.sqrt(pos.x ^ 2 + pos.y ^ 2 + pos.z ^ 2)
+            zRot = -math.deg(math.asin(pos.y / add))
+            
             --xRot = resetAngelRange(math.deg(math.atan2(-vec.z, vec.x)) + 180)
             --yRot = 0
             --zRot = -math.deg(math.asin(vec.y))
         end
     end
     
-    pdControl.rotInner(xRot, yRot, zRot, properties.profile[properties.profileIndex].spaceShip_P,
-        properties.profile[properties.profileIndex].spaceShip_D)
-    pdControl.moveWithRot(
-        math.deg(math.asin(joyUtil.BTStick.y)),
-        math.deg(math.asin(joyUtil.LeftStick.y)),
-        math.deg(math.asin(joyUtil.BTStick.x)),
+    local p              = properties.profile[properties.profileIndex].spaceShip_P * pdControl.rot_P_multiply
+    local d              = properties.profile[properties.profileIndex].spaceShip_D * pdControl.rot_D_multiply
+    local d2 = 18 * pdControl.rot_D_multiply
+    pdControl.pitchSpeed = resetAngelRange(attUtil.omega.z + zRot) * (p * 8) + -attUtil.omega.z * 7 * d2
+    pdControl.rollSpeed  = resetAngelRange(attUtil.omega.x + xRot) * p + -attUtil.omega.x * 7 * d
+    pdControl.yawSpeed   = resetAngelRange(attUtil.omega.y + yRot) * (p * 8) + -attUtil.omega.y * 7 * d2
+    applyRotDependentTorque(
+    pdControl.rollSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2),
+    pdControl.yawSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2),
+    pdControl.pitchSpeed * attUtil.MomentOfInertiaTensor * (ship.getScale().x ^ 2))
+
+    --pdControl.rotInner(xRot, yRot, zRot, p, d)
+    local forward, up, sideMove = math.deg(math.asin(joyUtil.BTStick.y)), math.deg(math.asin(joyUtil.LeftStick.y)),
+            math.deg(math.asin(joyUtil.BTStick.x))
+    if joyUtil.LeftJoyClick then
+        local p = properties.profile[properties.profileIndex].spaceShip_Burner
+        forward, up, sideMove = forward * p, up * p, sideMove * p
+    end
+    pdControl.moveWithRot( forward, up, sideMove,
         properties.profile[properties.profileIndex].spaceShip_Acc,
         properties.profile[properties.profileIndex].spaceShip_move_D)
 end
@@ -4482,6 +4508,34 @@ local send_to_childShips = function()
     end
 end
 
+local engineSound = function ()
+    --local speaker
+    while true do
+        if commands then
+            --InvariantForce
+            local val = math.abs(((RotDependentForce + InvariantForce + RotDependentTorque * 2) * 0.1 ) / attUtil.mass) * 0.1
+            local vo = val < 0 and 0 or val > 3 and 3 or val
+            local pic = val < 0.5 and 0.5 or val > 1 and 1 or val
+            local sPos = {
+                x = attUtil.position.x + attUtil.velocity.x * 8,
+                y = attUtil.position.y + attUtil.velocity.y * 8,
+                z = attUtil.position.z + attUtil.velocity.z * 8
+            }
+            commands.execAsync(string.format("playsound createdieselgenerators:diesel_engine_sound block @e[type=minecraft:player] %d %d %d %0.2f %0.4f 0.5", sPos.x, sPos.y, sPos.z, vo, pic))
+            --commands.execAsync(string.format("say %0.2f", vo))
+
+            if val < 0.5 then
+                sleep(0.25)
+            else
+                sleep(0.05)
+            end
+        else
+            --speaker = peripheral.find("speaker")
+            sleep(0.5)
+        end
+    end
+end
+
 ---------main---------
 
 system.init()
@@ -4642,13 +4696,17 @@ local refreshDisplay = function()
     end
 end
 
+local env = function ()
+    parallel.waitForAll(refreshDisplay, engineSound)
+end
+
 xpcall(function()
     monitorUtil.scanMonitors()
     if monitorUtil.screens["computer"] == nil then
         monitorUtil.disconnectComputer()
     end
     attUtil.init()
-    parallel.waitForAll(run, refreshDisplay)
+    parallel.waitForAll(run, env)
     error("Unexpected flight control exit")
 end, function(err)
     monitorUtil.onRootFatal()
