@@ -1,4 +1,4 @@
---[[ if not ship then
+if not ship then
     if term.isColor() then term.setTextColor(colors.red) end
     print("ShipAPI unavailable. Either this computer is not on a ship, or CC-VS is not installed.")
     return
@@ -8,7 +8,8 @@ if not ship.setStatic then
     print(
         "ExtendedShipAPI unavailable. Requires either disable \"command_only\" in CC-VS config, or a command computer.")
     return
-end ]]
+end
+
 peripheral.find("modem", rednet.open)
 ---------inner---------
 local modelist = {
@@ -692,11 +693,11 @@ scanner.scan = function()
 end
 
 scanner.scanShip = function()
-    return coordinate.getShips(256)
+    return coordinate.getShipsAll(256)
 end
 
 scanner.scanEntity = function()
-    return coordinate.getEntities(-1)
+    return coordinate.getEntitiesAll(-1)
 end
 
 scanner.getCommander = function()
@@ -1158,7 +1159,7 @@ pdControl.spaceShip = function()
     if properties.lock then
         if next(attUtil.tmpFlags.quat) == nil then attUtil.setLastPos() end
         if next(attUtil.tmpFlags.lastPos) == nil then attUtil.setLastPos() end
-        pdControl.rotate2quat(attUtil.tmpFlags.quat, 0.9, 9)
+        pdControl.rotate2quat(attUtil.tmpFlags.quat, 0.9, 2.8)
         pdControl.gotoPosition(nil, attUtil.tmpFlags.lastPos, properties.MAX_MOVE_SPEED)
     else
         local forward, up, sideMove = math.deg(math.asin(joyUtil.BTStick.y)), math.deg(math.asin(joyUtil.LeftStick.y)),
@@ -1890,6 +1891,7 @@ local rate_Roll            = setmetatable({ pageId = 22, pageName = "rate_Roll" 
 local rate_Yaw             = setmetatable({ pageId = 23, pageName = "rate_Yaw" }, { __index = abstractWindow })
 local rate_Pitch           = setmetatable({ pageId = 24, pageName = "rate_Pitch" }, { __index = abstractWindow })
 local set_fixedWing        = setmetatable({ pageId = 25, pageName = "set_fixedWing" }, { __index = abstractWindow })
+local set_followRange      = setmetatable({ pageId = 26, pageName = "set_followRange" }, { __index = abstractWindow })
 
 flightPages                = {
     modPage,              --1
@@ -1917,6 +1919,7 @@ flightPages                = {
     rate_Yaw,             --23
     rate_Pitch,           --24
     set_fixedWing,        --25
+    set_followRange       --26
 }
 
 --winIndex = 1
@@ -2703,6 +2706,64 @@ function set_camera:onTouch(x, y)
     end
 end
 
+function set_shipFollow:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 16
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+
+--winIndex = 26
+function set_followRange:init()
+    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
+        properties.other
+    self.indexFlag = 16
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+    }
+end
+function set_followRange:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+    local sp = split(
+        string.format("%d, %d, %d", properties.followRange.x, properties.followRange.y,
+            properties.followRange.z), ", ")
+    local sX, sY, sZ = sp[1], sp[2], sp[3]
+    self.window.setCursorPos(11, self.buttons[2].y)
+    self.window.blit(string.format("%d", sX), genStr(properties.font, #sX), genStr(properties.bg, #sX))
+    self.window.setCursorPos(11, self.buttons[3].y)
+    self.window.blit(string.format("%d", sY), genStr(properties.font, #sY), genStr(properties.bg, #sY))
+    self.window.setCursorPos(11, self.buttons[4].y)
+    self.window.blit(string.format("%d", sZ), genStr(properties.font, #sZ), genStr(properties.bg, #sZ))
+end
+
+function set_followRange:onTouch(x, y)
+    self:subPage_Back(x, y)
+    if y >= self.buttons[2].y and y <= self.buttons[4].y then
+        local result = 0
+        if x == 9 then
+            result = -1
+        elseif x == 14 then
+            result = 1
+        end
+        if y == self.buttons[2].y then
+            properties.followRange.x = properties.followRange.x + result
+        elseif y == self.buttons[3].y then
+            properties.followRange.y = properties.followRange.y + result
+        elseif y == self.buttons[4].y then
+            properties.followRange.z = properties.followRange.z + result
+        end
+    end
+end
+
 --winIndex = 19
 function set_shipFollow:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
@@ -2937,11 +2998,12 @@ function setPage:init()
         { text = "S_airShip  ",   x = 2,                  pageId = 9,  y = 7,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "User_Change",   x = 2,                  pageId = 10, y = 8,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Home_Set   ",   x = 2,                  pageId = 11, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Simulate   ",   x = 2,                  pageId = 12, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Profile    ",   x = 2,                  pageId = 14, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 13,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "MassFix",       x = 2,                  pageId = 21, y = 14,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
+        { text = "FollowRange",   x = 2,                  pageId = 26, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Simulate   ",   x = 2,                  pageId = 12, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Set_Att    ",   x = 2,                  pageId = 13, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Profile    ",   x = 2,                  pageId = 14, y = 13,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Colortheme ",   x = 2,                  pageId = 15, y = 14,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "MassFix",       x = 2,                  pageId = 21, y = 15,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
     }
     self.otherButtons = {
         { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
@@ -4510,30 +4572,30 @@ end
 
 local engineSound = function ()
     --local speaker
-    while true do
-        if commands then
-            --InvariantForce
-            local val = math.abs(((RotDependentForce + InvariantForce + RotDependentTorque * 2) * 0.1 ) / attUtil.mass) * 0.1
-            local vo = val < 0 and 0 or val > 3 and 3 or val
-            local pic = val < 0.5 and 0.5 or val > 1 and 1 or val
-            local sPos = {
-                x = attUtil.position.x + attUtil.velocity.x * 8,
-                y = attUtil.position.y + attUtil.velocity.y * 8,
-                z = attUtil.position.z + attUtil.velocity.z * 8
-            }
-            commands.execAsync(string.format("playsound createdieselgenerators:diesel_engine_sound block @e[type=minecraft:player] %d %d %d %0.2f %0.4f 0.5", sPos.x, sPos.y, sPos.z, vo, pic))
-            --commands.execAsync(string.format("say %0.2f", vo))
-
-            if val < 0.5 then
-                sleep(0.25)
-            else
-                sleep(0.05)
-            end
-        else
-            --speaker = peripheral.find("speaker")
-            sleep(0.5)
-        end
-    end
+    --while true do
+    --    if commands then
+    --        --InvariantForce
+    --        local val = math.abs(((RotDependentForce + InvariantForce + RotDependentTorque) * 0.1 ) / attUtil.mass) * 0.1
+    --        local vo = val < 0 and 0 or val > 3 and 3 or val
+    --        local pic = val < 0.5 and 0.5 or val > 1 and 1 or val
+    --        local sPos = {
+    --            x = attUtil.position.x + attUtil.velocity.x * 8,
+    --            y = attUtil.position.y + attUtil.velocity.y * 8,
+    --            z = attUtil.position.z + attUtil.velocity.z * 8
+    --        }
+    --        commands.execAsync(string.format("playsound createdieselgenerators:diesel_engine_sound block @e[type=minecraft:player] %d %d %d %0.2f %0.4f 0.5", sPos.x, sPos.y, sPos.z, vo, pic))
+    --        --commands.execAsync(string.format("say %0.2f", vo))
+--
+    --        if val < 0.5 then
+    --            sleep(0.25)
+    --        else
+    --            sleep(0.05)
+    --        end
+    --    else
+    --        --speaker = peripheral.find("speaker")
+    --        sleep(0.5)
+    --    end
+    --end
 end
 
 ---------main---------
@@ -4544,7 +4606,7 @@ if term.isColor() then
     shell.run("background", "shell")
 end
 
-function flightUpdate()
+local flightUpdate = function()
     send_to_childShips()
     if ship.isStatic() or engineOff then
         --static
@@ -4648,8 +4710,7 @@ local all_listener = function()
     parallel.waitForAll(listener, shipNet_run)
 end
 
-local runFlight = function()
-    sleep(0.1)
+local isPhysMode = function()
     if physics_flag then
         pdControl.basicYSpeed = 30
         pdControl.helicopt_P_multiply = 1.5
@@ -4659,17 +4720,32 @@ local runFlight = function()
         pdControl.move_P_multiply = 2
         pdControl.move_D_multiply = 100
         pdControl.airMass_multiply = 10
+        pdControl.quadFpv_P = 0.3456
+        pdControl.quadFpv_D = 7.25
+        return false
     else
         pdControl.basicYSpeed = 10
+        pdControl.helicopt_P_multiply = 1
+        pdControl.helicopt_D_multiply = 1
+        pdControl.rot_P_multiply = 1
+        pdControl.rot_D_multiply = 1
+        pdControl.move_P_multiply = 1
+        pdControl.move_D_multiply = 100
+        pdControl.airMass_multiply = 30
         pdControl.quadFpv_P = 0.2625
         pdControl.quadFpv_D = 16
-        return
+        return true
     end
+end
+
+local runFlight = function()
+    sleep(0.1)
 
     while true do
         if shutdown_flag then
             sleep(0.5)
         else
+            if isPhysMode() then return end
             attUtil.getAttWithCCTick()
             joyUtil.getJoyInput()
             flightUpdate()
