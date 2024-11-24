@@ -1531,7 +1531,7 @@ function absHoloGram:initData()
         b = 0,
         a = 0
     }
-    self.eye_offset = newVec(-2, 0.12, 0)
+    self.eye_offset = newVec(2, 0.12, 0)
     self.attBorder = new2dVec(0.1, 0.1)
     self.msg_bar_offset = 0.9
     self.cannon_bar_offset = 0.6
@@ -1559,8 +1559,9 @@ function absHoloGram:init()
     self.radarPos_right = new2dVec(0.2, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.radarModePos = new2dVec(0, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.eye_offset = newVec(self.eye_offset)
+    self.eye_offset.x = -math.abs(self.eye_offset.x)
     self.eye_len = self.eye_offset:len()
-    self.eye_pitch_offset = math.tan(math.asin(self.eye_offset.y / self.eye_len)) * self.eye_offset.x / 2 * self.midPoint.y
+    self.eye_pitch_offset = math.tan(math.asin(self.eye_offset.y / self.eye_len)) * self.eye_offset.x / 2 * self.midPoint.y / self.scale
 
     self.cannonCountPos = new2dVec(-0.9, self.cannon_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.targetPos = new2dVec(0, self.target_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
@@ -4499,8 +4500,7 @@ function absHologramSetPage:onTouch(x, y)
                 prop.lint_interval = self:checkInputRange(prop.lint_interval + result, 1, 30)
             elseif y == 9 then
                 local result = x == 41 and -1 or x == 42 and -0.1 or x == 48 and 0.1 or x == 49 and 1 or 0
-                prop.eye_offset.x = result + prop.eye_offset.x
-                prop.eye_offset.x = math.abs(prop.eye_offset.x) > 99 and copysign(99, prop.eye_offset.x) or prop.eye_offset.x
+                prop.eye_offset.x = self:checkInputRange(prop.eye_offset.x + result, 0, 30)
             elseif y == 10 then
                 local result = x == 41 and -0.1 or x == 42 and -0.01 or x == 48 and 0.01 or x == 49 and 0.1 or 0
                 prop.eye_offset.y = result + prop.eye_offset.y
