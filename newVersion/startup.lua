@@ -764,7 +764,7 @@ function flight_control:run(phy)
 
     local rowPoint = engine_controller.getFaceRaw()
     self.pX = quat.vecRot(self.rot, rowPoint)
-    self.pY = quat.vecRot(self.rot, self.y_point) --y_point = {0, 1, 0}
+    self.pY = quat.vecRot(self.rot, self.y_point)
     local m = self.rotMatrix_90
     self.pZ = {
         x = m[1][1] * rowPoint.x + m[1][2] * rowPoint.z,
