@@ -1431,9 +1431,11 @@ for k, v in pairs(jizhi_7x7_fonts) do
 end
 
 local my_5x5_letter_white = {}
+local my_5x5_letter_red = {}
 for k, v in pairs(my_5x5_letter) do
     my_5x5_letter[k] = BakeBitMap(v, 0x33FFFFFF)
     my_5x5_letter_white[k] = BakeBitMap(v, 0xFFFFFFFF)
+    my_5x5_letter_red[k] = BakeBitMap(v, 0xFF1111FF)
 end
 
 local my_4x5_number_white = {}
@@ -1554,7 +1556,7 @@ function absHoloGram:init()
     self.speedFontPos = new2dVec(-0.75, self.msg_bar_offset-0.01):scaleVec(self.midPoint):add(self.midPoint)
     self.energyPos = new2dVec(0.85, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.energyFontPos = new2dVec(0.85, self.msg_bar_offset+0.05):scaleVec(self.midPoint):add(self.midPoint)
-    self.massPos = new2dVec(0.7, self.msg_bar_offset-0.25):scaleVec(self.midPoint):add(self.midPoint)
+    self.massPos = new2dVec(0.85, self.msg_bar_offset-0.1):scaleVec(self.midPoint):add(self.midPoint)
     self.radarPos_left = new2dVec(-0.2, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.radarPos_right = new2dVec(0.2, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.radarModePos = new2dVec(0, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
@@ -1757,7 +1759,7 @@ function absHoloGram:drawCannon()
     local pos = self.cannonCountPos
     for i = 1, #linkedCannons, 1 do
         local yp = pos.y + (i - 1) * 6
-        self:draw_5x5_letter(new2dVec(pos.x, yp - 2), linkedCannons[i].name, false, true)
+        self:draw_5x5_letter(new2dVec(pos.x, yp - 2), linkedCannons[i].name, false, "white")
         self:draw_number(new2dVec(pos.x + 50, yp), linkedCannons[i].bullets_count, true)
         if linkedCannons[i].cross_point then
             self:drawCannonCross(linkedCannons[i].cross_point, cross_box)
@@ -1772,25 +1774,25 @@ function absHoloGram:radarPage()
         if properties.language == language[1] then
             self:draw_7x7_fonts(self.radarModePos, "_65e0")
         else
-            self:draw_5x5_letter(self.radarModePos, "null", true)
+            self:draw_5x5_letter(self.radarModePos, "null", "white")
         end
     elseif properties.radarMode == 2 then --vs_ship
         if properties.language == language[1] then
             self:draw_7x7_fonts(self.radarModePos, "_74e6,_5c14,_57fa,_91cc")
         else
-            self:draw_5x5_letter(self.radarModePos, "vs_ship", true)
+            self:draw_5x5_letter(self.radarModePos, "vs_ship", "white")
         end
     elseif properties.radarMode == 3 then --monster
         if properties.language == language[1] then
             self:draw_7x7_fonts(self.radarModePos, "_602a,_7269")
         else
-            self:draw_5x5_letter(self.radarModePos, "monster", true)
+            self:draw_5x5_letter(self.radarModePos, "monster", "white")
         end
     elseif properties.radarMode == 4 then --player
         if properties.language == language[1] then
             self:draw_7x7_fonts(self.radarModePos, "_73a9,_5bb6")
         else
-            self:draw_5x5_letter(self.radarModePos, "player", true)
+            self:draw_5x5_letter(self.radarModePos, "player", "white")
         end
     end
     
@@ -1826,7 +1828,7 @@ function absHoloGram:radarPage()
 
         if fflag then
             fflag  = false
-            self:draw_5x5_letter(self.targetPos, filterString(self.locked_list[k].name), true)
+            self:draw_5x5_letter(self.targetPos, filterString(self.locked_list[k].name), "white")
             if self.locked_list[k].health then
                 local x_offset = (self.locked_list[k].health / self.locked_list[k].maxHealth) * self.hp_bar_len * self.midPoint.x
                 self.screen.DrawLine(self.hp_pos_start.x, self.hp_pos_start.y, self.hp_pos_start.x + x_offset, self.hp_pos_end.y, 0x11FF11FF, 1)
@@ -1943,6 +1945,7 @@ function absHoloGram:drawBorder()
     self.screen.DrawLine(0, self.height - 1, 30, self.height - 1, 0xFFFFFFFF, 1)
 end
 
+local coupled_ct = 20
 function absHoloGram:draw_msg_bar()
     local ct = controllers.activated
     if self.drawInputLine and ct then
@@ -1958,13 +1961,19 @@ function absHoloGram:draw_msg_bar()
     if properties.language == language[1] then
         self:draw_7x7_fonts(self.hightFontPos, "_9ad8,_5ea6,_space,_7c73")
     else
-        self:draw_5x5_letter(self.hightFontPos, "height", true)
+        self:draw_5x5_letter(self.hightFontPos, "height", "white")
     end
     self:draw_number(self.speedPos, flight_control.speed * 3.6)
     self:draw_5x5_letter(self.speedFontPos, "km/h")
 
     self:draw_5x5_letter(self.energyFontPos, "need rpm")
     self:draw_number(self.energyPos, flight_control.mass / 20000)
+    if properties.coupled then
+        self:draw_5x5_letter(self.massPos, "coupled", "white") --Decoupled
+    elseif coupled_ct > 10 then
+        self:draw_5x5_letter(self.massPos, "decoupled", "red")
+    end
+    coupled_ct = coupled_ct > 1 and coupled_ct - 1 or 20
     --self:draw_number(self.massPos, math.abs(flight_control.all_force / 1000))
     --self:draw_number(self.massPos, math.deg(math.asin(flight_control.pX.y) * 100))
 
@@ -2018,7 +2027,7 @@ function absHoloGram:draw_7x7_fonts(pos, uni_arr)
     end
 end
 
-function absHoloGram:draw_5x5_letter(pos, str, white, left)
+function absHoloGram:draw_5x5_letter(pos, str, color, left)
     local arrs
     if str == "_cross" or str == "_cross_box" then
         arrs = {str}
@@ -2034,8 +2043,10 @@ function absHoloGram:draw_5x5_letter(pos, str, white, left)
     end
     for i, v in ipairs(arrs) do
         if v ~= " " then
-            if white then
+            if color == "white" then
                 self.screen.Blit(x, y, 5, 5, my_5x5_letter_white[v], 1)
+            elseif color == "red" then
+                self.screen.Blit(x, y, 5, 5, my_5x5_letter_red[v], 1)
             else
                 self.screen.Blit(x, y, 5, 5, my_5x5_letter[v], 1)
             end
