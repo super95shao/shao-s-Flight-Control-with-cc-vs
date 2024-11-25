@@ -4480,7 +4480,7 @@ function absHologramSetPage:onTouch(x, y)
             elseif y == 12 then
                 local result = x == 9 and -64 or x == 17 and 64 or 0
                 properties.radarRange = result + properties.radarRange
-                properties.radarRange = properties.radarRange > 2500 and 2500 or properties.radarRange < 64 and 64 or properties.radarRange
+                properties.radarRange = properties.radarRange > 2496 and 2496 or properties.radarRange < 64 and 64 or properties.radarRange
             end
         else
             if y == 3 then
