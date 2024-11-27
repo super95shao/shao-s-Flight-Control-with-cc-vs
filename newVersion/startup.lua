@@ -794,6 +794,7 @@ function flight_control:run(phy)
     self.pos = newVec(poseVel.pos)
     self.velocity = newVec(poseVel.velocity)
     self.velocityRot = quat.vecRot(rot_nega, self.velocity)
+    self.omega_raw = self.omega
     self.omega = quat.vecRot(rot_nega, self.omega)
 
     self.speed = self.velocity:len()
@@ -1295,7 +1296,12 @@ function radar:run()
                             tgPos = newVec(tg.x, tg.y + 0.5, tg.z),
                             velocity = tg.velocity,
                             mode = 3,
-                            fire = fire
+                            fire = fire,
+                            rot = flight_control.rot,
+                            raw_face = engine_controller.getFaceRaw(),
+                            pos = flight_control.pos,
+                            omega = flight_control.omega_raw,
+                            center_velocity = flight_control.velocity,
                         }, protocol)
                     end
                 end
