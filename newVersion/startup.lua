@@ -1043,7 +1043,7 @@ scanner = {
 }
 
 function scanner:getPlayer(range)
-    self.players = coordinate.getPlayers()
+    self.players = coordinate.getPlayers(range)
 
     for k, v in pairs(self.preplayers) do
         v.flag = false
@@ -1051,22 +1051,17 @@ function scanner:getPlayer(range)
 
     if self.players ~= nil then
         for k, v in pairs(self.players) do
-            local pos = flight_control.pos:copy():sub(newVec(v.x, v.y, v.z))
-            if math.sqrt(pos.x ^ 2 + pos.y ^ 2 + pos.z ^ 2) < range then
-                if scanner.preplayers[k] then
-                    v.velocity = {
-                        x = v.x - scanner.preplayers[v.uuid].x,
-                        y = v.y - scanner.preplayers[v.uuid].y,
-                        z = v.z - scanner.preplayers[v.uuid].z
-                    }
-                else
-                    v.velocity = newVec()
-                end
-                v.flag = true
-                scanner.preplayers[v.uuid] = v
+            if scanner.preplayers[k] then
+                v.velocity = {
+                    x = v.x - scanner.preplayers[v.uuid].x,
+                    y = v.y - scanner.preplayers[v.uuid].y,
+                    z = v.z - scanner.preplayers[v.uuid].z
+                }
             else
-                self.players[k] = nil
+                v.velocity = newVec()
             end
+            v.flag = true
+            scanner.preplayers[v.uuid] = v
         end
     end
 
@@ -1270,6 +1265,7 @@ function radar:run()
             if self.targets and target_count > 0 then
                 target_count = target_count < #self.targets and target_count or #self.targets
                 for i = 1, target_count, 1 do
+                    self.targets[i].y = self.targets[i].y + 0.5
                     self.final_targets[i] = self.targets[i]
                 end
             else
@@ -1293,7 +1289,7 @@ function radar:run()
                     local tg = self.final_targets[index]
                     if tg then
                         rednet.send(linkedCannons[i].id, {
-                            tgPos = newVec(tg.x, tg.y + 0.5, tg.z),
+                            tgPos = newVec(tg.x, tg.y, tg.z),
                             velocity = tg.velocity,
                             mode = 3,
                             fire = fire,
