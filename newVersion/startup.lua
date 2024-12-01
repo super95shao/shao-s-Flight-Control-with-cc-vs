@@ -4521,7 +4521,7 @@ function absHologramSetPage:onTouch(x, y)
             elseif y == 12 then
                 local result = x == 41 and -0.1 or x == 42 and -0.01 or x == 48 and 0.01 or x == 49 and 0.1 or 0
                 prop.attBorder.y = result + prop.attBorder.y
-                prop.attBorder.y = math.abs(prop.attBorder.y) > 0.5 and copysign(99, prop.attBorder.y) or prop.attBorder.y
+                prop.attBorder.y = math.abs(prop.attBorder.y) > 0.5 and copysign(0.5, prop.attBorder.y) or prop.attBorder.y
                 prop.attBorder.y = prop.attBorder.y < 0 and 0 or prop.attBorder.y
                 prop.attBorder.x = prop.attBorder.y
             elseif y == 13 then
