@@ -416,6 +416,7 @@ system.resetProp = function()
         language = language[1],
         password = "123456",
         whiteList = {},
+        shipNet_whiteList = {},
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -572,7 +573,7 @@ local DEFAULT_PARENT_SHIP = {
     id = -1,
     name = "",
     pos = newVec(),
-    quat = quat.new(),
+    rot = quat.new(),
     preQuat = quat.new(),
     velocity = newVec(),
     anchorage = { offset = newVec(), entry = "top" },
@@ -1045,7 +1046,7 @@ function flight_control:ShipCamera()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
 
-    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.025))
+    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.01))
     local maxSize = math.max(parentShip.size.x, parentShip.size.z)
     maxSize = math.max(maxSize, parentShip.size.y)
     local range = newVec(maxSize + xOffset, 0, 0)
@@ -1053,7 +1054,7 @@ function flight_control:ShipCamera()
     if ct then
         xOffset = xOffset + math.asin(ct.BTStick.y) * profile.camera_move_speed
         xOffset = xOffset < 3 and 3 or xOffset
-        xOffset = xOffset > 64 and 64 or xOffset
+        xOffset = xOffset > 128 and 128 or xOffset
 
         local myRot = newVec(
             math.asin(ct.RightStick.x) * profile.camera_rot_speed * 2,
@@ -1089,8 +1090,8 @@ function flight_control:ShipCamera()
     end
     range = quat.vecRot(cameraQuat, range)
     pos = pos:add(range)
-    self:gotoRot_PD(cameraQuat, 2, 32)
-    self:gotoPos_PD(pos, 6, 24)
+    self:gotoRot_PD(cameraQuat, 2, 24)
+    self:gotoPos_PD(pos, 6, 18)
 end
 
 function flight_control:gotoPos(pos)
@@ -1098,7 +1099,9 @@ function flight_control:gotoPos(pos)
 end
 
 function flight_control:gotoPos_PD(pos, p, d)
-    self:pd_wolrd_space_control(self.pos:copy():sub(pos):nega():scale(10):add(newVec(0, 10, 0)), p, d)
+    local tg = self.pos:copy():sub(pos)
+    tg = tg:len() > 299 and tg:norm():scale(299) or tg
+    self:pd_wolrd_space_control(tg:nega():scale(10):add(newVec(0, 10, 0)), p, d)
 end
 
 function flight_control:gotoRot(rot)
@@ -3060,6 +3063,27 @@ function shipNet_connect_Page:refresh()
     end
 end
 
+local accept_connect = function(ship, code)
+    shipNet_p2p_send(ship.id, "agree", code)
+    local flag = false
+    for k, v in pairs(childShips) do
+        if v.name == ship.name then
+            childShips[k] = ship
+            childShips[k].beat = beat_ct
+            flag = true
+            break
+        end
+    end
+
+    if not flag then
+        local newChild = ship
+        newChild.beat = beat_ct
+        table.insert(childShips, newChild)
+    end
+
+    table.remove(callList, 1)
+end
+
 function shipNet_connect_Page:onTouch(x, y)
     self:subPage_Back(x, y)
     if parentShip.id ~= -1 then
@@ -3071,11 +3095,8 @@ function shipNet_connect_Page:onTouch(x, y)
         local halfHeight = self.height / 2
         if y == halfHeight + 2 then
             if x >= halfWidth - 4 and x < halfWidth - 1 then
-                shipNet_p2p_send(callList[1].id, "agree")
-                local newChild = callList[1]
-                newChild.beat = beat_ct
-                table.insert(childShips, newChild)
-                table.remove(callList, 1)
+                table.insert(properties.shipNet_whiteList, callList[1].name)
+                accept_connect(callList[1], callList[1].code)
             elseif x >= halfWidth + 4 and x <= halfWidth + 6 then
                 shipNet_p2p_send(callList[1].id, "refuse")
                 table.remove(callList, 1)
@@ -3122,6 +3143,12 @@ function shipNet_connect_Page:onTouch(x, y)
                         break
                     end
                     i2 = i2 - 1
+                end
+                for k, v in pairs(properties.shipNet_whiteList) do
+                    if v == childShips[i2].name then
+                        table.remove(properties.shipNet_whiteList, k)
+                        break
+                    end
                 end
                 table.remove(childShips, i2)
                 break
@@ -5054,7 +5081,19 @@ local shipNet_getMessage = function() --从广播中筛选
                         table.insert(shipNet_list, msg)
                     end
                 elseif msg.request_connect == "call" and msg.name and msg.code then --收到连接请求
-                    table.insert(callList, { id = id, name = msg.name, code = msg.code, ct = 10 })
+                    local result = { id = id, name = msg.name, code = msg.code, ct = 10 }
+                    local flag = false
+                    for k, v in pairs(properties.shipNet_whiteList) do
+                        if msg.name == v then
+                            accept_connect(result, msg.code)
+                            flag = true
+                            break
+                        end
+                    end
+                    
+                    if not flag then
+                        table.insert(callList, result)
+                    end
                     monitorUtil.refreshAll()
                 elseif msg.request_connect == "back" and msg.name and msg.code == captcha then --回听请求是否被接受
                     if msg.result == "agree" then
@@ -5062,9 +5101,10 @@ local shipNet_getMessage = function() --从广播中筛选
                         parentShip.name = msg.name
                         parentShip.beat = beat_ct
                         parentShip.code = captcha
-                        parentShip.pos = DEFAULT_PARENT_SHIP.pos
-                        parentShip.quat = DEFAULT_PARENT_SHIP.quat
-                        parentShip.preQuat = DEFAULT_PARENT_SHIP.quat
+                        parentShip.pos = msg.pos
+                        parentShip.size = msg.size
+                        parentShip.rot = DEFAULT_PARENT_SHIP.rot
+                        parentShip.preQuat = DEFAULT_PARENT_SHIP.rot
                         parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
                         parentShip.anchorage = DEFAULT_PARENT_SHIP.anchorage
                     else
@@ -5086,7 +5126,7 @@ local shipNet_run = function() --启动船舶网络
     parallel.waitForAll(shipNet_beat, shipNet_getMessage)
 end
 
-shipNet_p2p_send = function(id, type) --发送p2p
+shipNet_p2p_send = function(id, type, code) --发送p2p
     if type == "call" then            --请求父级连接
         if call_ct <= 0 and id ~= parentShip.id then
             rednet.send(id, { name = shipName, code = captcha, request_connect = "call" }, public_protocol)
@@ -5094,8 +5134,12 @@ shipNet_p2p_send = function(id, type) --发送p2p
             call_ct = 10
         end
     elseif type == "agree" or type == "refuse" then --回复子级连接
-        rednet.send(id, { name = shipName, code = callList[1].code, request_connect = "back", result = type, pos = flight_control.pos },
-            public_protocol)
+        local result = { name = shipName, code = code, request_connect = "back", result = type }
+        if type == "agree" then
+            result.pos = flight_control.pos
+            result.size = flight_control.size
+        end
+        rednet.send(id, result, public_protocol)
     elseif type == "beat" then --向父级发送心跳包
         rednet.send(id, "beat", public_protocol)
     end
