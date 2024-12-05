@@ -566,7 +566,11 @@ function quat.nega(q)
 end
 
 local newQuat = function(w, x, y, z)
-    return setmetatable({ w = w, x = x, y = y, z = z }, { __index = quat })
+    if type(w) == "table" then
+        return setmetatable({ w = w.w, x = w.x, y = w.y, z = w.z}, { __index = quat })
+    else
+        return setmetatable({ w = w, x = x, y = y, z = z }, { __index = quat })
+    end
 end
 
 local DEFAULT_PARENT_SHIP = {
@@ -768,11 +772,11 @@ local send_to_childShips = function()
             local msg = {
                 id = computerId,
                 name = shipName,
-                pos = flight_control.pos,
-                rot = flight_control.rot_face,
-                preRot = flight_control.preRot,
-                velocity = flight_control.velocity,
-                size = flight_control.size,
+                pos = newVec(flight_control.pos),
+                rot = newQuat(flight_control.rot_face),
+                preRot = newQuat(flight_control.preRot),
+                velocity = newVec(flight_control.velocity),
+                size = newVec(flight_control.size),
                 anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
                 code = v.code
             }
