@@ -835,8 +835,8 @@ function flight_control:run(phy)
     local yaw_rot = math.rad(self.yaw) / 2
     local q_yaw = {
         w = math.cos(yaw_rot / 2),
-        x = math.sin(yaw_rot / 2),
-        y = 0,
+        x = 0,
+        y = math.sin(yaw_rot / 2),
         z = 0,
     }
 
