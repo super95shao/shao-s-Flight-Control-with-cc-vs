@@ -480,8 +480,8 @@ system.resetProp = function()
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 1,
-                camera_move_speed = 1,
-                shipFollow_move_speed = 1,
+                camera_move_speed = 0.5,
+                shipFollow_move_speed = 0.5,
             }
         },
         lock = false,
@@ -1045,7 +1045,7 @@ function flight_control:ShipCamera()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
 
-    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
+    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.025))
     local maxSize = math.max(parentShip.size.x, parentShip.size.z)
     maxSize = math.max(maxSize, parentShip.size.y)
     local range = newVec(maxSize + xOffset, 0, 0)
@@ -1089,8 +1089,8 @@ function flight_control:ShipCamera()
     end
     range = quat.vecRot(cameraQuat, range)
     pos = pos:add(range)
-    self:gotoRot_PD(cameraQuat, 2, 24)
-    self:gotoPos_PD(pos, 6, 18)
+    self:gotoRot_PD(cameraQuat, 2, 32)
+    self:gotoPos_PD(pos, 6, 24)
 end
 
 function flight_control:gotoPos(pos)
