@@ -736,6 +736,7 @@ flight_control = {
     pY = newVec(),
     pZ = newVec(),
     rot = quat.new(),
+    rot_face = quat.new(),
     lastPos = newVec(),
     lastRot = quat.new(),
     lastYaw = 0,
@@ -767,7 +768,7 @@ local send_to_childShips = function()
                 id = computerId,
                 name = shipName,
                 pos = flight_control.pos,
-                rot = flight_control.rot,
+                rot = flight_control.rot_face,
                 preRot = flight_control.preRot,
                 velocity = flight_control.velocity,
                 size = flight_control.size,
@@ -830,6 +831,16 @@ function flight_control:run(phy)
     self.roll = math.deg(math.asin(self.pZ.y))
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
     --self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
+
+    local yaw_rot = math.rad(self.yaw) / 2
+    local q_yaw = {
+        w = math.cos(yaw_rot / 2),
+        x = math.sin(yaw_rot / 2),
+        y = 0,
+        z = 0,
+    }
+
+    self.rot_face = quat.multiply(self.rot, q_yaw)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
