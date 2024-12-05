@@ -8,22 +8,21 @@ local shipNet_list = {}
 local beat_ct, call_ct, captcha, calling
 local childShips, callList, linkedCannons = {}, {}, {}
 local dimension = "overworld"
-
 peripheral.find("modem", rednet.open)
 
 local modelist = {
-    { name = "spaceShip",  flag = false },
-    { name = "quadFPV",    flag = false },
-    { name = "helicopter", flag = false },
-    { name = "airShip",    flag = false },
-    { name = "hms_fly",    flag = false },
-    { name = "follow",     flag = false },
-    { name = "goHome",     flag = false },
-    { name = "pointLoop ", flag = false },
+    { name = "SpaceShip",  flag = false },
+    { name = "QuadFPV",    flag = false },
+    { name = "Helicopter", flag = false },
+    { name = "AirShip",    flag = false },
+    { name = "Hms_Fly",    flag = false },
+    { name = "Follow",     flag = false },
+    { name = "GoHome",     flag = false },
+    { name = "PointLoop ", flag = false },
     { name = "ShipCamera", flag = false },
     { name = "ShipFollow", flag = false },
     { name = "Anchorage",  flag = false },
-    { name = "spaceFpv",   flag = false },
+    { name = "SpaceFpv",   flag = false },
     { name = "Fixed-wing", flag = false },
 }
 
@@ -343,6 +342,7 @@ local matrixMultiplication_3d = function (m, v)
     )
 end
 
+local blockOffset = newVec(0.5, 0.5, 0.5)
 ----------------------------------------------------
 system = {
     files = {
@@ -480,8 +480,8 @@ system.resetProp = function()
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 1,
-                camera_move_speed = 0.2,
-                shipFollow_move_speed = 0.2,
+                camera_move_speed = 1,
+                shipFollow_move_speed = 1,
             }
         },
         lock = false,
@@ -568,6 +568,19 @@ local newQuat = function(w, x, y, z)
     return setmetatable({ w = w, x = x, y = y, z = z }, { __index = quat })
 end
 
+local DEFAULT_PARENT_SHIP = {
+    id = -1,
+    name = "",
+    pos = newVec(),
+    quat = quat.new(),
+    preQuat = quat.new(),
+    velocity = newVec(),
+    anchorage = { offset = newVec(), entry = "top" },
+    size = ship.getSize(),
+    beat = beat_ct
+}
+
+local parentShip = DEFAULT_PARENT_SHIP
 
 local sin2cos = function(s)
     return math.sqrt( 1 - s ^ 2)
@@ -737,6 +750,33 @@ flight_control = {
     tmpp = 1 / (math.pi / 2)
 }
 
+local getWorldOffsetOfPcPos = function(v)
+    local wPos = flight_control.pos:copy()
+    local yardPos = newVec(engine_controller.getShipCenter())
+    local selfPos = newVec(coordinate.getAbsoluteCoordinates())
+    local offset = quat.vecRot(flight_control.rot, yardPos:sub(selfPos):sub(blockOffset):sub(v))
+    return wPos:sub(offset)
+end
+
+local send_to_childShips = function()
+    if #childShips > 0 then
+        for k, v in pairs(childShips) do
+            local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
+            local msg = {
+                id = computerId,
+                name = shipName,
+                pos = flight_control.pos,
+                quat = flight_control.rot,
+                preQuat = flight_control.preRot,
+                velocity = flight_control.velocity,
+                size = flight_control.size,
+                anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
+                code = v.code
+            }
+            rednet.send(v.id, msg, public_protocol)
+        end
+    end
+end
 
 function flight_control:pd_rot_control(vec, p, d)
     applyRotDependentTorque(vec:scale(p):sub(self.omega:scale(d)):scale(self.momentOfInertiaTensor[1][1]):unpack())
@@ -796,17 +836,25 @@ function flight_control:run(phy)
     self.velocityRot = quat.vecRot(rot_nega, self.velocity)
     self.omega_raw = self.omega
     self.omega = quat.vecRot(rot_nega, self.omega)
+    self.size = engine_controller.getSize()
 
     self.speed = self.velocity:len()
 
-    if modelist[properties.mode].name == "spaceShip" then
+    if modelist[properties.mode].name == "SpaceShip" then
         self:spaceShip()
-    elseif modelist[properties.mode].name == "quadFPV" then
+    elseif modelist[properties.mode].name == "QuadFPV" then
         self:fpv()
-    elseif modelist[properties.mode].name == "helicopter" then
+    elseif modelist[properties.mode].name == "Helicopter" then
         self:helicopter()
+    elseif modelist[properties.mode].name == "ShipCamera" then
+        if parentShip.id ~= -1 then
+            self:ShipCamera()
+        else
+            self:spaceShip()
+        end
     end
     
+    send_to_childShips()
 end
 
 local press_ct_1 = 0
@@ -991,8 +1039,66 @@ function flight_control:helicopter()
     self:pd_mov_control(movFor, 1, profile.spaceShip_move_D)
 end
 
+local cameraQuat = quat.new()
+local xOffset = 0
+function flight_control:ShipCamera()
+    local ct = controllers.activated
+    local profile = properties.profile[properties.profileIndex]
+
+    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
+    local maxSize = math.max(parentShip.size.x, parentShip.size.z)
+    maxSize = math.max(maxSize, parentShip.size.y)
+    local range = newVec(maxSize + xOffset, 0, 0)
+
+    if ct then
+        xOffset = xOffset + math.asin(ct.BTStick.y) * profile.camera_move_speed
+        xOffset = xOffset < 3 and 3 or xOffset
+        xOffset = xOffset > 64 and 64 or xOffset
+
+        local myRot = newVec(
+            math.asin(ct.RightStick.x) * profile.camera_rot_speed * 2,
+            math.asin(ct.LeftStick.x) * profile.camera_rot_speed,
+            math.asin(ct.LeftStick.y) * profile.camera_rot_speed
+        )
+
+        myRot:scale(0.05)
+        local x_rot = myRot.x / 2
+        local qx = {
+            w = math.cos(x_rot),
+            x = math.sin(x_rot),
+            y = 0,
+            z = 0
+        }
+        local y_rot = -myRot.y / 2
+        local qy = {
+            w = math.cos(y_rot),
+            x = 0,
+            y = math.sin(y_rot),
+            z = 0
+        }
+        local z_rot = myRot.z / 2
+        local qz = {
+            w = math.cos(z_rot),
+            x = 0,
+            y = 0,
+            z = math.sin(z_rot)
+        }
+
+        local q_rot = quat.multiply(quat.multiply(qx, qy), qz)
+        cameraQuat = quat.multiply(cameraQuat, q_rot)
+    end
+    range = quat.vecRot(cameraQuat, range)
+    pos = pos:add(range)
+    self:gotoRot_PD(cameraQuat, 2, 24)
+    self:gotoPos_PD(pos, 6, 18)
+end
+
 function flight_control:gotoPos(pos)
-    self:pd_wolrd_space_control(self.pos:sub(pos):nega():scale(10):add(newVec(0, 10, 0)), 1, 6)
+    self:gotoPos_PD(pos, 1, 6)
+end
+
+function flight_control:gotoPos_PD(pos, p, d)
+    self:pd_wolrd_space_control(self.pos:copy():sub(pos):nega():scale(10):add(newVec(0, 10, 0)), p, d)
 end
 
 function flight_control:gotoRot(rot)
@@ -1000,7 +1106,8 @@ function flight_control:gotoRot(rot)
 end
 
 function flight_control:gotoRot_PD(rot, p, d)
-    local xp, zp = quat.vecRot(self.rot, newVec(1, 0, 0)), quat.vecRot(self.rot, newVec(0, 0, 1))
+    local selfRot = newQuat(self.rot.w, self.rot.x, self.rot.y, self.rot.z)
+    local xp, zp = quat.vecRot(selfRot, newVec(1, 0, 0)), quat.vecRot(selfRot, newVec(0, 0, 1))
     xp = quat.vecRot(quat.nega(rot), xp)
     zp = quat.vecRot(quat.nega(rot), zp)
     local xRot = math.deg(math.asin(zp.y))
@@ -1265,7 +1372,7 @@ function radar:run()
             if self.targets and target_count > 0 then
                 target_count = target_count < #self.targets and target_count or #self.targets
                 for i = 1, target_count, 1 do
-                    self.targets[i].y = self.targets[i].y + 0.5
+                    self.targets[i].y = self.targets[i].y
                     self.final_targets[i] = self.targets[i]
                 end
             else
@@ -1680,6 +1787,9 @@ function absHoloGram:refresh()
     if self.drawHoloBorder then
         self:drawBorder()
     end
+    --self.screen.DrawLine(0, self.midPoint.y, self.width, self.midPoint.y, 0x33FFFFFF)
+    --self.screen.DrawLine(self.midPoint.x, 0, self.midPoint.x, self.height, 0x33FFFFFF)
+    --self:draw_number(new2dVec(1,1), math.floor(flight_control.pitch * 100))
     self.screen.Flush()
 end
 
@@ -1687,7 +1797,6 @@ local genParticle = function(x, y, z)
     commands.execAsync(string.format("particle electric_spark %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
 end
 
-local blockOffset = newVec(0.5, 0.5, 0.5)
 local holoOffset = newVec(0, 1, 0)
 function absHoloGram:getSelfPos()
     local offset = newVec(engine_controller.getShipCenter()):sub(newVec(self.screen.GetBlockPos())):sub(blockOffset):sub(vector.copy(self.translation):add(holoOffset))
@@ -1877,7 +1986,9 @@ local scale_lower = {
 }
 
 function absHoloGram:getLockPos(v)
-    local pos = self:offset_from_self(v):sub(self.eye_offset)
+    local e2e = self.eye_offset:copy()
+    --e2e.y = e2e.y * self.scale
+    local pos = self:offset_from_self(v):sub(e2e)
     local len = pos:len()
     local sin_y = pos.y / len
     local sin_x = (-pos.z / len)
@@ -2510,7 +2621,7 @@ function attPage:refresh()
 
             self.window.setCursorPos(x - #mod / 2 + 2, yPos + 1)
             self.window.blit(mod, genStr(title, #mod), genStr(bg, #mod))
-            if mod == "spaceShip" then
+            if mod == "SpaceShip" then
                 if joyUtil and joyUtil.LeftJoyClick then
                     self.window.setCursorPos(x - 3, y)
                     self.window.blit("!BURNING!", "fffffffff", "eeeeeeeee")
@@ -2566,19 +2677,19 @@ function attPage:refresh()
                 end
             end
         else
-            if mod == "spaceShip" or mod == "quadFPV" then
+            if mod == "SpaceShip" or mod == "QuadFPV" then
                 self:drawSpeed(mod, bg, font, title, select, other)
             end
         end
     else
-        if mod == "spaceShip" or mod == "quadFPV" then
+        if mod == "SpaceShip" or mod == "QuadFPV" then
             self:drawSpeed(mod, bg, font, title, select, other)
         end
     end
 end
 
 function attPage:drawSpeed(mod, bg, font, title, select, other)
-    if mod == "spaceShip" then
+    if mod == "SpaceShip" then
         self.window.setCursorPos(math.floor(self.width / 2) + 1, math.floor(self.height / 2))
         if properties.coupled then
             self.window.blit("C", bg, select)
@@ -2616,13 +2727,13 @@ function attPage:onTouch(x, y)
             if yPos > 1 then y = y - 1 end
             if y == by + 2 and x >= bx - 2 and x <= bx + 10 then
                 local index
-                if mod == "spaceShip" then
+                if mod == "SpaceShip" then
                     index = 6
-                elseif mod == "quadFPV" then
+                elseif mod == "QuadFPV" then
                     index = 7
-                elseif mod == "helicopter" then
+                elseif mod == "Helicopter" then
                     index = 8
-                elseif mod == "airShip" then
+                elseif mod == "AirShip" then
                     index = 9
                 end
                 if index then
@@ -2636,14 +2747,14 @@ function attPage:onTouch(x, y)
                 properties.coupled = not properties.coupled
             end
         else
-            if mod == "spaceShip" then
+            if mod == "SpaceShip" then
                 if y == math.floor(self.height / 2) and x == math.floor(self.width / 2) + 1 then
                     properties.coupled = not properties.coupled
                 end
             end
         end
     else
-        if mod == "spaceShip" then
+        if mod == "SpaceShip" then
             if y == math.floor(self.height / 2) and x == math.floor(self.width / 2) + 1 then
                 properties.coupled = not properties.coupled
             end
@@ -2803,17 +2914,16 @@ function shipNetPage:onTouch(x, y)
         if self.row == maxRow or info == -1 then
             if y == self.height - 1 then
                 if x >= 2 and x <= 2 + 3 then
-                    properties.winIndex[self.name][self.row][self.column] = 16
+                    properties.winIndex[self.name][self.row][self.column] = 15
                 elseif x >= self.width - 7 then
-                    properties.winIndex[self.name][self.row][self.column] = 17
+                    properties.winIndex[self.name][self.row][self.column] = 16
                 end
             end
         end
 
         if (self.pageIndex == 1 and (y > 2)) or (self.pageIndex > 1 and y > 1 and y < self.height - 2) then
             local index = #shipNet_list > listLen and listLen * (self.pageIndex - 1) + 2 - yPos or
-                2 -
-                yPos --融合窗口中每页从第几个开始打印
+                2 - yPos --融合窗口中每页从第几个开始打印
             index = y - 3 + index
             if shipNet_list[index] then
                 shipNet_p2p_send(shipNet_list[index].id, "call")
@@ -2826,7 +2936,7 @@ end
 function shipNet_set_Page:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 3
+    self.indexFlag = 2
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,            blitB = bg },
         { text = "set_camera",    x = 2, y = 3, blitF = genStr(font, 10), blitB = genStr(bg, 10), select = genStr(select, 10), flag = false },
@@ -2853,11 +2963,11 @@ function shipNet_set_Page:onTouch(x, y)
             if y == v.y and x >= v.x and x <= v.x + #v.text then
                 if v.flag then
                     if v.text == "set_camera" then
-                        properties.winIndex[self.name][self.row][self.column] = 18
+                        properties.winIndex[self.name][self.row][self.column] = 17
                     elseif v.text == "set_follow" then
-                        properties.winIndex[self.name][self.row][self.column] = 19
+                        properties.winIndex[self.name][self.row][self.column] = 18
                     elseif v.text == "set_anchorage" then
-                        properties.winIndex[self.name][self.row][self.column] = 20
+                        properties.winIndex[self.name][self.row][self.column] = 19
                     end
                 else
                     v.flag = true
@@ -2873,7 +2983,7 @@ end
 function shipNet_connect_Page:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 3
+    self.indexFlag = 2
     self.buttons = {
         { text = "<", x = 1, y = 1, blitF = title, blitB = bg },
     }
@@ -4972,6 +5082,7 @@ local shipNet_getMessage = function() --从广播中筛选
 end
 
 local shipNet_run = function() --启动船舶网络
+    sleep(0.1)
     parallel.waitForAll(shipNet_beat, shipNet_getMessage)
 end
 
@@ -4983,30 +5094,10 @@ shipNet_p2p_send = function(id, type) --发送p2p
             call_ct = 10
         end
     elseif type == "agree" or type == "refuse" then --回复子级连接
-        rednet.send(id, { name = shipName, code = callList[1].code, request_connect = "back", result = type },
+        rednet.send(id, { name = shipName, code = callList[1].code, request_connect = "back", result = type, pos = flight_control.pos },
             public_protocol)
     elseif type == "beat" then --向父级发送心跳包
         rednet.send(id, "beat", public_protocol)
-    end
-end
-
-local send_to_childShips = function()
-    if #childShips > 0 then
-        for k, v in pairs(childShips) do
-            local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
-            local msg = {
-                id = computerId,
-                name = shipName,
-                pos = flight_control.pos,
-                quat = flight_control.rot,
-                preQuat = flight_control.preRot,
-                velocity = flight_control.velocity,
-                size = flight_control.size,
-                anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
-                code = v.code
-            }
-            rednet.send(v.id, msg, public_protocol)
-        end
     end
 end
 
@@ -5155,7 +5246,7 @@ local run_Controllers = function ()
 end
 
 local run = function ()
-    parallel.waitForAll(run_event, run_radar, run_fire_control, run_Controllers, run_hologram)
+    parallel.waitForAll(run_event, run_radar, run_fire_control, run_Controllers, run_hologram, shipNet_run)
 end
 
 system:init()
