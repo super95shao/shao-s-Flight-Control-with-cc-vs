@@ -1108,7 +1108,7 @@ function flight_control:ShipFollow()
     offset = quat.vecRot(parentShip.rot, offset)
     pos = pos:add(offset)
     self:gotoRot_PD(parentShip.rot, 2, 24)
-    self:gotoPos_PD(pos, 6, 18)
+    self:gotoPos_PD(pos, 12, 12)
 end
 
 function flight_control:gotoPos(pos)
