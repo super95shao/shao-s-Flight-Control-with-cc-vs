@@ -3192,7 +3192,7 @@ end
 function set_camera:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 16
+    self.indexFlag = 15
     self.buttons = {
         { text = "<",              x = 1, y = 1, blitF = title,                      blitB = bg },
         { text = "rotSpeed -   +", x = 2, y = 3, blitF = genStr(font, 9) .. "fffff", blitB = genStr(bg, 9) .. "b" .. genStr(bg, 3) .. "e" },
@@ -3233,7 +3233,7 @@ end
 function set_shipFollow:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 16
+    self.indexFlag = 15
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
         { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
@@ -3246,7 +3246,7 @@ end
 function set_followRange:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 16
+    self.indexFlag = 15
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
         { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
@@ -3292,12 +3292,12 @@ end
 function set_shipFollow:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
-    self.indexFlag = 16
+    self.indexFlag = 15
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
-        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
+        { text = "xOffset-     +", x = 2, y = 3, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
+        { text = "yOffset-     +", x = 2, y = 5, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
+        { text = "zOffset-     +", x = 2, y = 7, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
     }
 end
 
@@ -3322,7 +3322,7 @@ function set_shipFollow:onTouch(x, y)
         local result = 0
         if x == 9 then
             result = -1
-        elseif x == 14 then
+        elseif x == 15 then
             result = 1
         end
         if y == self.buttons[2].y then
