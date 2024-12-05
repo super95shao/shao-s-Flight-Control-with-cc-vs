@@ -1055,7 +1055,8 @@ function flight_control:ShipCamera()
         xOffset = xOffset + math.asin(ct.BTStick.y) * profile.camera_move_speed
         xOffset = xOffset < 3 and 3 or xOffset
         xOffset = xOffset > 128 and 128 or xOffset
-
+        range = newVec(maxSize + xOffset, 0, 0)
+        
         local myRot = newVec(
             math.asin(ct.RightStick.x) * profile.camera_rot_speed * 2,
             math.asin(ct.LeftStick.x) * profile.camera_rot_speed,
