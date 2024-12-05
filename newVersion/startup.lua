@@ -767,8 +767,8 @@ local send_to_childShips = function()
                 id = computerId,
                 name = shipName,
                 pos = flight_control.pos,
-                quat = flight_control.rot,
-                preQuat = flight_control.preRot,
+                rot = flight_control.rot,
+                preRot = flight_control.preRot,
                 velocity = flight_control.velocity,
                 size = flight_control.size,
                 anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
@@ -850,6 +850,12 @@ function flight_control:run(phy)
     elseif modelist[properties.mode].name == "ShipCamera" then
         if parentShip.id ~= -1 then
             self:ShipCamera()
+        else
+            self:spaceShip()
+        end
+    elseif modelist[properties.mode].name == "ShipFollow" then
+        if parentShip.id ~= -1 then
+            self:ShipFollow()
         else
             self:spaceShip()
         end
@@ -1046,7 +1052,7 @@ function flight_control:ShipCamera()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
 
-    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.01))
+    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local maxSize = math.max(parentShip.size.x, parentShip.size.z)
     maxSize = math.max(maxSize, parentShip.size.y)
     local range = newVec(maxSize + xOffset, 0, 0)
@@ -1056,7 +1062,7 @@ function flight_control:ShipCamera()
         xOffset = xOffset < 3 and 3 or xOffset
         xOffset = xOffset > 128 and 128 or xOffset
         range = newVec(maxSize + xOffset, 0, 0)
-        
+
         local myRot = newVec(
             math.asin(ct.RightStick.x) * profile.camera_rot_speed * 2,
             math.asin(ct.LeftStick.x) * profile.camera_rot_speed,
@@ -1092,6 +1098,16 @@ function flight_control:ShipCamera()
     range = quat.vecRot(cameraQuat, range)
     pos = pos:add(range)
     self:gotoRot_PD(cameraQuat, 2, 24)
+    self:gotoPos_PD(pos, 6, 18)
+end
+
+function flight_control:ShipFollow()
+    local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
+    local offset = newVec(properties.shipFollow_offset)
+    offset.x = offset.x + parentShip.size.x + flight_control.size.x
+    offset = quat.vecRot(parentShip.rot, offset)
+    pos = pos:add(offset)
+    self:gotoRot_PD(parentShip.rot, 2, 24)
     self:gotoPos_PD(pos, 6, 18)
 end
 
@@ -5139,6 +5155,7 @@ shipNet_p2p_send = function(id, type, code) --发送p2p
         if type == "agree" then
             result.pos = flight_control.pos
             result.size = flight_control.size
+            result.rot = flight_control.rot
         end
         rednet.send(id, result, public_protocol)
     elseif type == "beat" then --向父级发送心跳包
