@@ -739,6 +739,7 @@ flight_control = {
     rot_face = quat.new(),
     lastPos = newVec(),
     lastRot = quat.new(),
+    q_yaw = quat.new(),
     lastYaw = 0,
     yaw = 0,
     roll = 0,
@@ -832,15 +833,15 @@ function flight_control:run(phy)
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
     --self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
 
-    local yaw_rot = math.rad(self.yaw) / 2
-    local q_yaw = {
-        w = math.cos(yaw_rot / 2),
+    local yaw_rot = -math.atan2(rowPoint.z, rowPoint.x) / 2
+    self.q_yaw = {
+        w = math.cos(yaw_rot),
         x = 0,
-        y = math.sin(yaw_rot / 2),
+        y = math.sin(yaw_rot),
         z = 0,
     }
 
-    self.rot_face = quat.multiply(self.rot, q_yaw)
+    self.rot_face = quat.multiply(self.rot, self.q_yaw)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
@@ -1116,9 +1117,11 @@ function flight_control:ShipFollow()
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local offset = newVec(properties.shipFollow_offset)
     offset.x = offset.x + parentShip.size.x + flight_control.size.x
-    offset = quat.vecRot(parentShip.rot, offset)
+
+    local parentQ = quat.multiply(parentShip.rot, quat.nega(self.q_yaw))
+    offset = quat.vecRot(parentQ, offset)
     pos = pos:add(offset)
-    self:gotoRot_PD(parentShip.rot, 2, 24)
+    self:gotoRot_PD(parentQ, 2, 24)
     self:gotoPos_PD(pos, 12, 12)
 end
 
