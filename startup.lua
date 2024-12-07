@@ -110,7 +110,7 @@ system.reset = function()
         profile = {
             keyboard = {
                 spaceShip_P = 0.1,       --角速度比例, 决定转向快慢
-                spaceShip_D = 0.52,       --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
+                spaceShip_D = 2,       --角速度阻尼, 低了停的慢、太高了会抖动。标准是松杆时快速停下角速度、且停下时不会抖动
                 spaceShip_Acc = 0.4,      --星舰模式油门速度
                 spaceShip_SideMove = 0.2, --星舰模式横移速度
                 spaceShip_Burner = 3.0,   --星舰模式加力燃烧倍率
@@ -805,9 +805,10 @@ attUtil.getAttWithCCTick = function()
 
     attUtil.size = ship.getSize()
     attUtil.position = ship.getWorldspacePosition()
-    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], ship.getQuaternion())
+    attUtil.oQuat = ship.getQuaternion()
+    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], attUtil.oQuat)
     attUtil.conjQuat = getConjQuat(ship.getQuaternion())
-    attUtil.matrix = ship.getRotationMatrix()
+    attUtil.matrix = ship.getTransformationMatrix()
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
     local tmpYawrad = math.rad(attUtil.eulerAngle.yaw)
     attUtil.yawMatrix = { { -math.sin(tmpYawrad), -math.cos(tmpYawrad) },
@@ -832,7 +833,8 @@ attUtil.getAttWithPhysTick = function()
 
     attUtil.size = ship.getSize()
     attUtil.position = attUtil.poseVel.pos
-    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], attUtil.poseVel.rot)
+    attUtil.oQuat = attUtil.poseVel.rot
+    attUtil.quat = quatMultiply(attUtil.quatList[properties.shipFace], attUtil.oQuat)
     attUtil.conjQuat = getConjQuat(attUtil.poseVel.rot)
     attUtil.matrix = ship.getRotationMatrix()
     attUtil.eulerAngle = quat2Euler(attUtil.quat)
@@ -1633,11 +1635,11 @@ pdControl.ShipFollow = function()
     }
 
     local offsets = {
-        x = properties.shipFollow_offset.x + parentShip.size.x,
+        x = properties.shipFollow_offset.x,
         y = properties.shipFollow_offset.y,
         z = properties.shipFollow_offset.z
     }
-    local newPos = RotateVectorByQuat(parentShip.quat, offsets)
+    local newPos = RotateVectorByQuat(getConjQuat(parentShip.quat), offsets)
 
     pos.x = pos.x + newPos.x
     pos.y = pos.y + newPos.y
@@ -2185,7 +2187,11 @@ function attPage:refresh()
             self.window.setCursorPos(x - 3, y + 4)
             self.window.blit(("%6.1f km/h"):format(attUtil.speed * 3.6), genStr(select, 11), genStr(bg, 11))
             self.window.setCursorPos(x - 3, y + 5)
-            self.window.blit(("H   %5.1f m"):format(attUtil.position.y), genStr(select, 11), genStr(bg, 11))
+            if attUtil.position.y < 99999 then
+                self.window.blit(("H %7.1f m"):format(attUtil.position.y), genStr(select, 11), genStr(bg, 11))
+            else
+                self.window.blit(("H  %5.1f km"):format(attUtil.position.y / 1000), genStr(select, 11), genStr(bg, 11))
+            end
 
             if info.maxColumn > 2 then
                 self.window.setCursorPos(x - self.width - joyUtil.LeftStick.x * (self.width / 2 - 2),
@@ -4558,7 +4564,7 @@ local send_to_childShips = function()
                 id = computerId,
                 name = shipName,
                 pos = attUtil.position,
-                quat = attUtil.quat,
+                quat = attUtil.oQuat,
                 preQuat = attUtil.preQuat,
                 velocity = attUtil.velocity,
                 size = attUtil.size,
@@ -4571,31 +4577,31 @@ local send_to_childShips = function()
 end
 
 local engineSound = function ()
-    --local speaker
-    --while true do
-    --    if commands then
-    --        --InvariantForce
-    --        local val = math.abs(((RotDependentForce + InvariantForce + RotDependentTorque) * 0.1 ) / attUtil.mass) * 0.1
-    --        local vo = val < 0 and 0 or val > 3 and 3 or val
-    --        local pic = val < 0.5 and 0.5 or val > 1 and 1 or val
-    --        local sPos = {
-    --            x = attUtil.position.x + attUtil.velocity.x * 8,
-    --            y = attUtil.position.y + attUtil.velocity.y * 8,
-    --            z = attUtil.position.z + attUtil.velocity.z * 8
-    --        }
-    --        commands.execAsync(string.format("playsound createdieselgenerators:diesel_engine_sound block @e[type=minecraft:player] %d %d %d %0.2f %0.4f 0.5", sPos.x, sPos.y, sPos.z, vo, pic))
-    --        --commands.execAsync(string.format("say %0.2f", vo))
---
-    --        if val < 0.5 then
-    --            sleep(0.25)
-    --        else
-    --            sleep(0.05)
-    --        end
-    --    else
-    --        --speaker = peripheral.find("speaker")
-    --        sleep(0.5)
-    --    end
-    --end
+    local speaker
+    while true do
+        if commands then
+            --InvariantForce
+            local val = math.abs(((RotDependentForce + InvariantForce + RotDependentTorque) * 0.1 ) / attUtil.mass) * 0.1
+            local vo = val < 0 and 0 or val > 3 and 3 or val
+            local pic = val < 0.5 and 0.5 or val > 1 and 1 or val
+            local sPos = {
+                x = attUtil.position.x + attUtil.velocity.x * 8,
+                y = attUtil.position.y + attUtil.velocity.y * 8,
+                z = attUtil.position.z + attUtil.velocity.z * 8
+            }
+            commands.execAsync(string.format("playsound createdieselgenerators:diesel_engine_sound block @e[type=minecraft:player] %d %d %d %0.2f %0.4f 0.5", sPos.x, sPos.y, sPos.z, vo, pic))
+            --commands.execAsync(string.format("say %0.2f", vo))
+
+            if val < 0.5 then
+                sleep(0.25)
+            else
+                sleep(0.05)
+            end
+        else
+            --speaker = peripheral.find("speaker")
+            sleep(0.5)
+        end
+    end
 end
 
 ---------main---------
@@ -4678,7 +4684,6 @@ local listener = function()
             if physics_flag then
                 physics_flag = false
             end
-            --commands.execAsync(("say phy"))
             testRun(eventData[2])
         end
 
