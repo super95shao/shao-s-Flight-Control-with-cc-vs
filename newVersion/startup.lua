@@ -4044,7 +4044,7 @@ function set_user:init()
 end
 
 function set_user:refresh()
-    scanner:getPlayer()
+    scanner:getPlayer(properties.radarRange)
     self:refreshButtons()
     self:refreshTitle()
     local bg, font, select = properties.bg, properties.font, properties.select
