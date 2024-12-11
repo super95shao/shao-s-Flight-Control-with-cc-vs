@@ -2526,7 +2526,6 @@ function modPage:onTouch(x, y)
                     if v.modeId then
                         if properties.mode == v.modeId then
                             if v.modeId < 5 then
-                                flight_control:setLastPos()
                                 properties.lock = not properties.lock
                             end
                         else
@@ -2540,6 +2539,7 @@ function modPage:onTouch(x, y)
                 end
             end
         end
+        flight_control:setLastPos()
     elseif y == self.otherButtons[1].y then
         if #self.buttons - 1 > self.pageIndex * (self.height - self.cutRow) then
             self.pageIndex = self.pageIndex + 1
@@ -4730,6 +4730,8 @@ function hologramManagerScreen:refresh()
     self.monitor.setTextColor(colors.white)
     self.monitor.setBackgroundColor(colors.black)
     self.monitor.clear()
+    self.monitor.setCursorPos(1, 1)
+    self.monitor.write(" <")
     local cursorIndex = 2
     for k, v in pairs(self.holograms) do
         self.monitor.setBackgroundColor(colors.blue)
@@ -4740,8 +4742,11 @@ function hologramManagerScreen:refresh()
 end
 
 function hologramManagerScreen:onTouch(x, y)
-    if y > #self.holograms + 1 or y < 2 then
+    if y > #self.holograms + 1 then
         return
+    end
+    if y < 2 then
+        monitorUtil.newScreen(self.name, nil)
     end
     monitorUtil.newScreen(self.name, self.holograms[y - 1])
 end
