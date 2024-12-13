@@ -581,7 +581,7 @@ local DEFAULT_PARENT_SHIP = {
     preQuat = quat.new(),
     velocity = newVec(),
     anchorage = { offset = newVec(), entry = "top" },
-    size = ship.getSize(),
+    size = engine_controller.getSize(),
     beat = beat_ct
 }
 
@@ -2400,6 +2400,7 @@ local rate_Yaw             = setmetatable({ pageId = 22, pageName = "rate_Yaw" }
 local rate_Pitch           = setmetatable({ pageId = 23, pageName = "rate_Pitch" }, { __index = abstractWindow })
 local set_fixedWing        = setmetatable({ pageId = 24, pageName = "set_fixedWing" }, { __index = abstractWindow })
 local set_followRange      = setmetatable({ pageId = 25, pageName = "set_followRange" }, { __index = abstractWindow })
+local recordings           = setmetatable({ pageId = 26, pageName = "recordings" }, { __index = abstractWindow })
 
 flightPages                = {
     modPage,              --1
@@ -2425,8 +2426,9 @@ flightPages                = {
     rate_Roll,            --21
     rate_Yaw,             --22
     rate_Pitch,           --23
-    set_fixedWing,        --25
-    set_followRange       --26
+    set_fixedWing,        --24
+    set_followRange,      --25
+    recordings            --26
 }
 
 --winIndex = 1
@@ -3419,7 +3421,8 @@ function setPage:init()
         { text = "Set_Att    ",   x = 2,                  pageId = 12, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Profile    ",   x = 2,                  pageId = 13, y = 13,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Colortheme ",   x = 2,                  pageId = 14, y = 14,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "MassFix",       x = 2,                  pageId = 20, y = 15,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false }
+        { text = "MassFix",       x = 2,                  pageId = 20, y = 15,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false },
+        { text = "Recordings ",   x = 2,                  pageId = 26, y = 16,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false }
     }
     self.otherButtons = {
         { text = "      v      ", x = 2, y = self.height - 1, blitF = genStr(bg, 13), blitB = genStr(other, 13) },
@@ -4086,6 +4089,27 @@ function set_home:refresh()
 end
 
 function set_home:onTouch(x, y)
+    self:subPage_Back(x, y)
+end
+
+--winIndex = 26
+function recordings:init()
+    local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
+    self.indexFlag = 4
+    self.buttons = {
+        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "REC", x = 2, y = 10, blitF = "eee", blitB = "fff" },
+        { text = "[|]", x = 6, y = 10, blitF = "ddd", blitB = "fff" },
+        { text = "[>]", x = 12, y = 10, blitF = "000", blitB = "fff" }
+    }
+end
+
+function recordings:refresh()
+    self:refreshButtons()
+    self:refreshTitle()
+end
+
+function recordings:onTouch(x, y)
     self:subPage_Back(x, y)
 end
 
