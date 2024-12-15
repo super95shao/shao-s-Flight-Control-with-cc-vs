@@ -4958,7 +4958,7 @@ monitorUtil.refresh = function()
             for i = 1, #screen.windows, 1 do
                 for j = 1, #screen.windows[i], 1 do
                     local page = properties.winIndex[n][i][j]
-                    if page == 2 or page == 4 or page == 3 or page == 17 then
+                    if page == 2 or page == 3 or page == 16 then
                         screen.windows[i][j][page]:refresh()
                     end
                 end
