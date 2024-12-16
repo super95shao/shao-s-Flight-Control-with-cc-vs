@@ -417,6 +417,7 @@ system.resetProp = function()
         password = "123456",
         whiteList = {},
         shipNet_whiteList = {},
+        spaceShipThrottle = 3,
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -892,10 +893,11 @@ function flight_control:spaceShip()
         self:gotoRot(self.lastRot)
     else
         if ct then
+            local throttle_level = properties.spaceShipThrottle * 0.33 + 0.01
             local PD_FROM_PROFILE = rotController(new2dVec(profile.spaceShip_forward, profile.spaceShip_sideMove))
-            movFor.x = math.deg(math.asin(ct.BTStickRot.y)) * math.abs(PD_FROM_PROFILE.x)
-            movFor.y = math.deg(math.asin(ct.LeftStick.y)) * profile.spaceShip_vertMove
-            movFor.z = math.deg(math.asin(ct.BTStickRot.x)) * math.abs(PD_FROM_PROFILE.y)
+            movFor.x = math.deg(math.asin(ct.BTStickRot.y)) * math.abs(PD_FROM_PROFILE.x) * throttle_level
+            movFor.y = math.deg(math.asin(ct.LeftStick.y)) * profile.spaceShip_vertMove * throttle_level
+            movFor.z = math.deg(math.asin(ct.BTStickRot.x)) * math.abs(PD_FROM_PROFILE.y) * throttle_level
             movFor:scale(0.5)
             if ct.LeftJoyClick then
                 movFor:scale(profile.spaceShip_burner)
@@ -903,6 +905,16 @@ function flight_control:spaceShip()
             if ct.RightJoyClick and press_ct_1 < 1 then
                 properties.coupled = not properties.coupled
                 press_ct_1 = 30
+            end
+            if (ct.up or ct.down) and press_ct_1 < 1 then
+                if ct.up then
+                     properties.spaceShipThrottle = properties.spaceShipThrottle + 1
+                     properties.spaceShipThrottle = properties.spaceShipThrottle > 9 and 9 or properties.spaceShipThrottle
+                else 
+                    properties.spaceShipThrottle = properties.spaceShipThrottle - 1
+                    properties.spaceShipThrottle = properties.spaceShipThrottle < 1 and 1 or properties.spaceShipThrottle
+                end
+                press_ct_1 = 10
             end
 
             if press_ct_1 > 0 then
@@ -1721,6 +1733,9 @@ function absHoloGram:init()
     self.hp_bar_len = 0.6
     self.hp_text_start = new2dVec(-0.3 - 12 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     self.hp_text_end = new2dVec(0.3 + 12 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
+    
+    self.ThrottlePos = new2dVec(0.4, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
+    self.ThrottleFontPos = new2dVec(0.4 + 20 * per_pix_for_pers, self.msg_bar_offset + 2 * per_pix_for_pers):scaleVec(self.midPoint):add(self.midPoint)
 
     self.borders = { full = new2dVec(0, 0), attBorder = self.attBorder }
     for k, v in pairs(self.borders) do
@@ -2119,6 +2134,8 @@ function absHoloGram:draw_msg_bar()
 
     self:draw_5x5_letter(self.energyFontPos, "need rpm")
     self:draw_number(self.energyPos, flight_control.mass / 20000)
+    self:draw_5x5_letter(self.ThrottlePos, "throttle")
+    self:draw_number(self.ThrottleFontPos, properties.spaceShipThrottle, true)
     if properties.coupled then
         self:draw_5x5_letter(self.massPos, "coupled", "white") --Decoupled
     elseif coupled_ct > 10 then
