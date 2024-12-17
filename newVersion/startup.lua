@@ -736,6 +736,7 @@ end
 flight_control = {
     mass = 0,
     omega = newVec(),
+    hold = false,
     pos = newVec(),
     pX = newVec(),
     pY = newVec(),
@@ -744,6 +745,7 @@ flight_control = {
     rot_face = quat.new(),
     lastPos = newVec(),
     lastRot = quat.new(),
+    lastForce = newVec(),
     q_yaw = quat.new(),
     lastYaw = 0,
     yaw = 0,
@@ -892,51 +894,63 @@ function flight_control:spaceShip()
         self:gotoPos(self.lastPos)
         self:gotoRot(self.lastRot)
     else
-        if ct then
-            local throttle_level = properties.spaceShipThrottle * 0.33 + 0.01
-            local PD_FROM_PROFILE = rotController(new2dVec(profile.spaceShip_forward, profile.spaceShip_sideMove))
-            movFor.x = math.deg(math.asin(ct.BTStickRot.y)) * math.abs(PD_FROM_PROFILE.x) * throttle_level
-            movFor.y = math.deg(math.asin(ct.LeftStick.y)) * profile.spaceShip_vertMove * throttle_level
-            movFor.z = math.deg(math.asin(ct.BTStickRot.x)) * math.abs(PD_FROM_PROFILE.y) * throttle_level
-            movFor:scale(0.5)
-            if ct.LeftJoyClick then
-                movFor:scale(profile.spaceShip_burner)
-            end
-            if ct.RightJoyClick and press_ct_1 < 1 then
-                properties.coupled = not properties.coupled
-                press_ct_1 = 30
-            end
-            if (ct.up or ct.down) and press_ct_1 < 1 then
-                if ct.up then
-                     properties.spaceShipThrottle = properties.spaceShipThrottle + 1
-                     properties.spaceShipThrottle = properties.spaceShipThrottle > 9 and 9 or properties.spaceShipThrottle
-                else 
-                    properties.spaceShipThrottle = properties.spaceShipThrottle - 1
-                    properties.spaceShipThrottle = properties.spaceShipThrottle < 1 and 1 or properties.spaceShipThrottle
-                end
-                press_ct_1 = 10
-            end
+        if ct and ct.start and press_ct_1 < 1 then
+            flight_control.hold = not flight_control.hold
+            flight_control:setLastPos()
+            press_ct_1 = 30
+        end
 
-            if press_ct_1 > 0 then
-                press_ct_1 = press_ct_1 - 1
+        if flight_control.hold then
+            --local rot = self:genRotByEuler(0, self.lastYaw, 0)
+            --self:pd_mov_control(self.lastForce, 1, profile.spaceShip_move_D)
+            --self:pd_rot_control(rot, profile.spaceShip_P, profile.spaceShip_D)
+        else
+            if ct then
+                local throttle_level = properties.spaceShipThrottle * 0.33 + 0.01
+                local PD_FROM_PROFILE = rotController(new2dVec(profile.spaceShip_forward, profile.spaceShip_sideMove))
+                movFor.x = math.deg(math.asin(ct.BTStickRot.y)) * math.abs(PD_FROM_PROFILE.x) * throttle_level
+                movFor.y = math.deg(math.asin(ct.LeftStick.y)) * profile.spaceShip_vertMove * throttle_level
+                movFor.z = math.deg(math.asin(ct.BTStickRot.x)) * math.abs(PD_FROM_PROFILE.y) * throttle_level
+                movFor:scale(0.5)
+                if ct.LeftJoyClick then
+                    movFor:scale(profile.spaceShip_burner)
+                end
+                if ct.RightJoyClick and press_ct_1 < 1 then
+                    properties.coupled = not properties.coupled
+                    press_ct_1 = 30
+                end
+                if (ct.up or ct.down) and press_ct_1 < 1 then
+                    if ct.up then
+                         properties.spaceShipThrottle = properties.spaceShipThrottle + 1
+                         properties.spaceShipThrottle = properties.spaceShipThrottle > 9 and 9 or properties.spaceShipThrottle
+                    else
+                        properties.spaceShipThrottle = properties.spaceShipThrottle - 1
+                        properties.spaceShipThrottle = properties.spaceShipThrottle < 1 and 1 or properties.spaceShipThrottle
+                    end
+                    press_ct_1 = 10
+                end
+        
+                rotFor.x = math.asin(ct.RightStickRot.x)
+                rotFor.y = math.asin(ct.LeftStick.x)
+                rotFor.z = math.asin(ct.RightStickRot.y)
+                rotFor:scale(5)
             end
     
-            rotFor.x = math.asin(ct.RightStickRot.x)
-            rotFor.y = math.asin(ct.LeftStick.x)
-            rotFor.z = math.asin(ct.RightStickRot.y)
-            rotFor:scale(5)
-        end
-
-        if properties.coupled then
-            if dimension ~= "solar_system" then
-                movFor:add(quat.vecRot(quat.nega(self.rot), newVec(0, 10, 0)))
+            if properties.coupled then
+                if dimension ~= "solar_system" then
+                    movFor:add(quat.vecRot(quat.nega(self.rot), newVec(0, 10, 0)))
+                end
+                self:pd_mov_control(movFor, 1, profile.spaceShip_move_D)
+            else
+                self:pd_mov_control(movFor, 1, 0.2)
             end
-            self:pd_mov_control(movFor, 1, profile.spaceShip_move_D)
-        else
-            self:pd_mov_control(movFor, 1, 0.2)
-        end
 
-        self:pd_rot_control(rotFor, profile.spaceShip_P, profile.spaceShip_D)
+            self.lastForce = movFor
+            self:pd_rot_control(rotFor, profile.spaceShip_P, profile.spaceShip_D)
+        end
+        if press_ct_1 > 0 then
+            press_ct_1 = press_ct_1 - 1
+        end
     end
 end
 
@@ -1736,6 +1750,7 @@ function absHoloGram:init()
     
     self.ThrottlePos = new2dVec(0.4, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.ThrottleFontPos = new2dVec(0.4 + 20 * per_pix_for_pers, self.msg_bar_offset + 2 * per_pix_for_pers):scaleVec(self.midPoint):add(self.midPoint)
+    self.holdingPos = new2dVec(-0.4, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
 
     self.borders = { full = new2dVec(0, 0), attBorder = self.attBorder }
     for k, v in pairs(self.borders) do
@@ -2134,8 +2149,13 @@ function absHoloGram:draw_msg_bar()
 
     self:draw_5x5_letter(self.energyFontPos, "need rpm")
     self:draw_number(self.energyPos, flight_control.mass / 20000)
-    self:draw_5x5_letter(self.ThrottlePos, "throttle")
-    self:draw_number(self.ThrottleFontPos, properties.spaceShipThrottle, true)
+    if properties.mode == 1 then
+        self:draw_5x5_letter(self.ThrottlePos, "throttle")
+        self:draw_number(self.ThrottleFontPos, properties.spaceShipThrottle, true)
+        if flight_control.hold then
+            self:draw_5x5_letter(self.holdingPos, "holding")
+        end
+    end
     if properties.coupled then
         self:draw_5x5_letter(self.massPos, "coupled", "white") --Decoupled
     elseif coupled_ct > 10 then
@@ -5349,11 +5369,16 @@ end
 
 local run_hologram = function ()
     sleep(0.1)
-    hologram_manager:getAllHoloGram()
+    local need_init = true
     while true do
-        if engine_controller.isStatic() then
+        if ship.isStatic() then
             sleep(0.5)
+            need_init = true
         else
+            if need_init then
+                hologram_manager:getAllHoloGram()
+                need_init = false
+            end
             engine_controller.setIdle(false)
             hologram_manager:refresh()
             sleep(0.05)
