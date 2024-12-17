@@ -910,7 +910,8 @@ function flight_control:spaceShip()
 
         if flight_control.hold then
             local rot = self:genRotByEuler(0, self.lastYaw, 0)
-            self:pd_mov_control(self.lastForce:copy(), 1, profile.spaceShip_move_D)
+            local mov = newVec(self.lastForce.x / 2, self.lastForce.y, self.lastForce.z / 2)
+            self:pd_mov_control(mov, 1, profile.spaceShip_move_D)
             self:gotoRot_PD(rot, 1, 18)
         else
             if ct then
