@@ -820,6 +820,7 @@ function flight_control:run(phy)
         z = m[2][1] * rowPoint.x + m[2][2] * rowPoint.z,
     }
     self.pZ = quat.vecRot(self.rot, self.pZ)
+    self.pRow = quat.vecRot(self.rot, newVec(-1, 0, 0))
 
     self.faceMatrix = {
         {rowPoint.x, rowPoint.z},
@@ -1212,7 +1213,7 @@ end
 function flight_control:setLastPos()
     self.lastPos = self.pos
     self.lastRot = self.rot
-    self.lastYaw = math.atan2(self.pX.z, self.pX.x)
+    self.lastYaw = math.atan2(self.pRow.z, self.pRow.x)
 end
 --------------------------------------------------
 
