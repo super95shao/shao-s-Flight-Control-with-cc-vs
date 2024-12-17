@@ -439,10 +439,9 @@ system.resetProp = function()
                 max_throttle = 1.5,
                 throttle_mid = 0.15,
                 throttle_expo = 1.0,
-                helicopt_YAW_P = 0.75,
-                helicopt_ROT_P = 0.75,
-                helicopt_ROT_D = 0.75,
-                helicopt_MAX_ANGLE = 30,
+                helicopt_ROT_P = 0.3,
+                helicopt_ROT_D = 0.5,
+                helicopt_MAX_ANGLE = 50,
                 helicopt_ACC = 0.5,
                 helicopt_ACC_D = 0.75,
                 airShip_ROT_P = 1,
@@ -472,10 +471,9 @@ system.resetProp = function()
                 max_throttle = 1.5,
                 throttle_mid = 0.15,
                 throttle_expo = 1.0,
-                helicopt_YAW_P = 0.75,
-                helicopt_ROT_P = 0.75,
-                helicopt_ROT_D = 0.75,
-                helicopt_MAX_ANGLE = 30,
+                helicopt_ROT_P = 0.3,
+                helicopt_ROT_D = 0.5,
+                helicopt_MAX_ANGLE = 50,
                 helicopt_ACC = 0.5,
                 helicopt_ACC_D = 0.75,
                 airShip_ROT_P = 1,
@@ -894,16 +892,26 @@ function flight_control:spaceShip()
         self:gotoPos(self.lastPos)
         self:gotoRot(self.lastRot)
     else
-        if ct and ct.start and press_ct_1 < 1 then
-            flight_control.hold = not flight_control.hold
-            flight_control:setLastPos()
-            press_ct_1 = 30
+        if ct then
+            if flight_control.hold and press_ct_1 < 1 and (
+                math.abs(ct.BTStick.y) > 0.2 or
+                math.abs(ct.LeftStick.x) > 0.2 or
+                math.abs(ct.RightStick.x) > 0.2 or
+                math.abs(ct.RightStick.y) > 0.2) then
+                flight_control.hold = false
+            end
+
+            if ct.start and press_ct_1 < 1 then
+                flight_control.hold = not flight_control.hold
+                flight_control:setLastPos()
+                press_ct_1 = 30
+            end
         end
 
         if flight_control.hold then
-            --local rot = self:genRotByEuler(0, self.lastYaw, 0)
-            --self:pd_mov_control(self.lastForce, 1, profile.spaceShip_move_D)
-            --self:pd_rot_control(rot, profile.spaceShip_P, profile.spaceShip_D)
+            local rot = self:genRotByEuler(0, self.lastYaw, 0)
+            self:pd_mov_control(self.lastForce:copy(), 1, profile.spaceShip_move_D)
+            self:gotoRot_PD(rot, 1, 18)
         else
             if ct then
                 local throttle_level = properties.spaceShipThrottle * 0.33 + 0.01
@@ -940,9 +948,9 @@ function flight_control:spaceShip()
                 if dimension ~= "solar_system" then
                     movFor:add(quat.vecRot(quat.nega(self.rot), newVec(0, 10, 0)))
                 end
-                self:pd_mov_control(movFor, 1, profile.spaceShip_move_D)
+                self:pd_mov_control(movFor:copy(), 1, profile.spaceShip_move_D)
             else
-                self:pd_mov_control(movFor, 1, 0.2)
+                self:pd_mov_control(movFor:copy(), 1, 0.2)
             end
 
             self.lastForce = movFor
@@ -1073,19 +1081,21 @@ function flight_control:helicopter()
     local movFor = newVec()
     local rot
     --local localPoint = quat.vecRot(self.rot, newVec(1, 0, 0))
-    local localYaw = math.atan2(self.pX.z, -self.pX.x)
+    local localYaw = math.atan2(self.pX.z, self.pX.x)
     if ct then
+        local max_ag = math.rad(profile.helicopt_MAX_ANGLE) * 2 / math.pi
         rot = self:genRotByEuler(
-        -math.asin(ct.RightStickRot.y),
-        resetAngelRange(localYaw + math.asin(ct.LeftStick.x)),
-        math.asin(ct.RightStickRot.x)
+            -math.asin(ct.RightStickRot.y * max_ag),
+            resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 2),
+            math.asin(ct.RightStickRot.x * max_ag)
         )
+        movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
     else
         rot = self:genRotByEuler(0, localYaw, 0)
     end
-    self:gotoRot_PD(rot, 1, 18)
-    movFor:add(quat.vecRot(quat.nega(self.rot), newVec(0, 10, 0)))
-    self:pd_mov_control(movFor, 1, profile.spaceShip_move_D)
+    self:gotoRot_PD(rot, profile.helicopt_ROT_P, profile.helicopt_ROT_D * 10)
+    movFor.y = movFor.y + 10
+    self:pd_mov_control(movFor, 1, 0.05)
 end
 
 local cameraQuat = quat.new()
@@ -1181,13 +1191,14 @@ function flight_control:gotoRot_PD(rot, p, d)
 end
 
 function flight_control:genRotByEuler(pitch, yaw, roll)
-    local cosp = math.cos(pitch)
-    local cosr = math.cos(roll)
-    local xp = newVec(math.cos(yaw) * cosp, math.sin(pitch), math.sin(yaw) * cosp)
-    local zp = newVec(-math.sin(yaw) * cosr, -math.sin(roll), math.cos(yaw) * cosr)
-    xp = matrixMultiplication_3d(self.faceMatrix3d, xp)
-    zp = matrixMultiplication_3d(self.faceMatrix3d, zp)
-
+    local cosp = math.abs(math.cos(pitch))
+    local cosr = math.abs(math.cos(roll))
+    local xp = newVec(-math.cos(yaw) * cosp, math.sin(pitch), math.sin(yaw) * cosp)
+    local zp = newVec(-math.sin(yaw) * cosr, math.sin(roll), -math.cos(yaw) * cosr)
+    --commands.execAsync(("say %.2f %.2f %.2f"):format(xp.x, xp.y, xp.z))
+    --commands.execAsync(("say %.2f %.2f %.2f"):format(zp.x, zp.y, zp.z))
+    --xp = matrixMultiplication_3d(self.faceMatrix3d, xp)
+    --zp = matrixMultiplication_3d(self.faceMatrix3d, zp)
     local halfR = math.asin(zp.y) / 2
     local xRot = newQuat(math.cos(halfR), math.sin(halfR), 0, 0)
     local halfY = math.atan2(xp.z, xp.x) / 2
@@ -1200,7 +1211,7 @@ end
 function flight_control:setLastPos()
     self.lastPos = self.pos
     self.lastRot = self.rot
-    self.lastYaw = self.yaw
+    self.lastYaw = math.atan2(self.pX.z, self.pX.x)
 end
 --------------------------------------------------
 
@@ -3949,9 +3960,8 @@ function set_helicopter:init()
     self.indexFlag = 4
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                         blitB = bg },
-        { text = "Yaw_P--    ++", x = 2, y = 3, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
-        { text = "Rot_P--    ++", x = 2, y = 4, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
-        { text = "Rot_D--    ++", x = 2, y = 5, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "Rot_P--    ++", x = 2, y = 3, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "Rot_D--    ++", x = 2, y = 4, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
         { text = "ACC:-   +",     x = 2, y = 6, blitF = genStr(font, 4) .. "fffff",    blitB = genStr(bg, 4) .. "b" .. genStr(bg, 3) .. "e" },
         { text = "Acc_D--    ++", x = 2, y = 7, blitF = genStr(font, 5) .. "ffffffff", blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
         { text = "MaxAngle:-  +", x = 2, y = 9, blitF = genStr(font, 9) .. "ffff",     blitB = genStr(bg, 9) .. "b" .. genStr(bg, 2) .. "e" }
@@ -3967,10 +3977,8 @@ function set_helicopter:refresh()
         genStr(properties.bg, 16))
     self.window.setTextColor(getColorDec(properties.font))
     self.window.setCursorPos(9, 3)
-    self.window.write(string.format("%0.2f", profile.helicopt_YAW_P))
-    self.window.setCursorPos(9, 4)
     self.window.write(string.format("%0.2f", profile.helicopt_ROT_P))
-    self.window.setCursorPos(9, 5)
+    self.window.setCursorPos(9, 4)
     self.window.write(string.format("%0.2f", profile.helicopt_ROT_D))
     self.window.setCursorPos(7, 6)
     self.window.write(string.format("%0.1f", profile.helicopt_ACC))
@@ -3995,10 +4003,8 @@ function set_helicopter:onTouch(x, y)
             if x == 13 then result = 0.01 end
             if x == 14 then result = 0.1 end
             if y == 3 then
-                profile.helicopt_YAW_P = profile.helicopt_YAW_P + result < 0 and 0 or profile.helicopt_YAW_P + result
-            elseif y == 4 then
                 profile.helicopt_ROT_P = profile.helicopt_ROT_P + result < 0 and 0 or profile.helicopt_ROT_P + result
-            elseif y == 5 then
+            elseif y == 4 then
                 profile.helicopt_ROT_D = profile.helicopt_ROT_D + result < 0 and 0 or profile.helicopt_ROT_D + result
             elseif y == 7 then
                 profile.helicopt_ACC_D = profile.helicopt_ACC_D + result < 0 and 0 or profile.helicopt_ACC_D + result
@@ -4012,7 +4018,7 @@ function set_helicopter:onTouch(x, y)
             if x == 14 then result = 1 end
             profile.helicopt_MAX_ANGLE = profile.helicopt_MAX_ANGLE + result < 0 and 0 or
                 profile.helicopt_MAX_ANGLE + result
-            profile.helicopt_MAX_ANGLE = profile.helicopt_MAX_ANGLE > 60 and 60 or profile.helicopt_MAX_ANGLE
+            profile.helicopt_MAX_ANGLE = profile.helicopt_MAX_ANGLE > 90 and 90 or profile.helicopt_MAX_ANGLE
         end
     end
 end
@@ -5371,7 +5377,7 @@ local run_hologram = function ()
     sleep(0.1)
     local need_init = true
     while true do
-        if ship.isStatic() then
+        if ship and ship.isStatic() then
             sleep(0.5)
             need_init = true
         else
