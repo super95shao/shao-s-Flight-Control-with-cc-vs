@@ -911,9 +911,12 @@ function flight_control:spaceShip()
 
         if flight_control.hold then
             local rot = self:genRotByEuler(0, self.lastYaw, 0)
-            local mov = newVec(self.lastForce.x / 2, self.lastForce.y, self.lastForce.z / 2)
+            local mov = newVec(self.lastForce.x, self.lastForce.y, self.lastForce.z)
+            if dimension ~= "solar_system" then
+                mov:add(quat.vecRot(quat.nega(self.rot), newVec(0, 10, 0)))
+            end
             self:pd_mov_control(mov, 1, profile.spaceShip_move_D)
-            self:gotoRot_PD(rot, 1, 18)
+            self:gotoRot_PD(rot, 0.3, 9)
         else
             if ct then
                 local throttle_level = properties.spaceShipThrottle * 0.33 + 0.01
@@ -944,6 +947,8 @@ function flight_control:spaceShip()
                 rotFor.y = math.asin(ct.LeftStick.x)
                 rotFor.z = math.asin(ct.RightStickRot.y)
                 rotFor:scale(5)
+
+                self.lastForce = movFor:copy()
             end
     
             if properties.coupled then
@@ -955,7 +960,6 @@ function flight_control:spaceShip()
                 self:pd_mov_control(movFor:copy(), 1, 0.2)
             end
 
-            self.lastForce = movFor
             self:pd_rot_control(rotFor, profile.spaceShip_P, profile.spaceShip_D)
         end
         if press_ct_1 > 0 then
