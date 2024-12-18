@@ -821,6 +821,7 @@ function flight_control:run(phy)
     }
     self.pZ = quat.vecRot(self.rot, self.pZ)
     self.pRow = quat.vecRot(self.rot, newVec(-1, 0, 0))
+    self.pZRow = quat.vecRot(self.rot, newVec(0, 0, -1))
 
     self.faceMatrix = {
         {rowPoint.x, rowPoint.z},
@@ -998,6 +999,7 @@ local getFpvThrottle = function(mid, t_exp, x)
     return flag and -result or result
 end
 
+local limitRad = math.rad(60)
 function flight_control:fpv()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
@@ -1052,26 +1054,20 @@ function flight_control:fpv()
         end
     else
         local pp = math.abs(self.pY.y)
-        pp = pp > 0.3 and pp or 0.3
+        pp = pp > 0.5 and pp or 0.5
         movFor.y = 10 / pp
         movFor.y = movFor.y == math.huge and 10 or movFor.y
         movFor.y = movFor.y - self.velocityRot.y
         
-        local newVel = self.velocityRot:copy()
-        local len = newVel:len()
-        newVel = newVel:norm():nega()
-        local rotFor = newVec(len * math.asin(newVel.z), 0, len * math.asin(newVel.x))
+        local newVel = self.velocityRot
+        local rotFor = newVec(-newVel.z, 0, newVel.x)
         rotFor:scale(9)
-        rotFor.x = math.abs(rotFor.x) > 89 and copysign(89, rotFor.x) or rotFor.x
-        rotFor.z = math.abs(rotFor.z) > 89 and copysign(89, rotFor.z) or rotFor.z
 
-        rotFor.x = (rotFor.x - self.roll)
-        rotFor.z = -(rotFor.z - self.pitch)
-        local len2 = math.sqrt(rotFor.x ^ 2 + rotFor.z ^ 2)
-        if len2 > 60 then
-            rotFor.x = rotFor.x / len2 * 60
-            rotFor.z = rotFor.z / len2 * 60
-        end
+        rotFor.x = rotFor.x - math.deg(math.asin(self.pZRow.y))
+        rotFor.z = rotFor.z + math.deg(math.asin(self.pRow.y))
+        rotFor.x = math.abs(rotFor.x) > 90 and copysign(90, rotFor.x) or rotFor.x
+        rotFor.z = math.abs(rotFor.z) > 90 and copysign(90, rotFor.z) or rotFor.z
+        --commands.execAsync(("say %d, %d"):format(rotFor.x, rotFor.z))
 
         applyRotDependentTorque(rotFor:scale(2):sub(self.omega:scale(30)):scale(self.momentOfInertiaTensor[1][1]):unpack())
     end
@@ -1087,7 +1083,7 @@ function flight_control:helicopter()
     local movFor = newVec()
     local rot
     --local localPoint = quat.vecRot(self.rot, newVec(1, 0, 0))
-    local localYaw = math.atan2(self.pX.z, self.pX.x)
+    local localYaw = math.atan2(self.pRow.z, self.pRow.x)
     if ct then
         local max_ag = math.rad(profile.helicopt_MAX_ANGLE) * 2 / math.pi
         rot = self:genRotByEuler(
@@ -4160,6 +4156,7 @@ end
 
 function recordings:onTouch(x, y)
     self:subPage_Back(x, y)
+    
 end
 
 --winIndex = 12
