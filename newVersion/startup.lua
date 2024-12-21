@@ -419,6 +419,7 @@ system.resetProp = function()
         whiteList = {},
         shipNet_whiteList = {},
         spaceShipThrottle = 3,
+        lastParent = -1,
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -1220,8 +1221,8 @@ function flight_control:ShipFollow()
     local parentQ = quat.multiply(parentShip.rot, quat.nega(self.q_yaw))
     offset = quat.vecRot(parentQ, offset)
     pos = pos:add(offset)
-    self:gotoRot_PD(parentQ, 2, 24)
-    self:gotoPos_PD(pos, 12, 12)
+    self:gotoRot_PD(parentQ, 7, 30)
+    self:gotoPos_PD(pos, 18, 20)
 end
 
 function flight_control:gotoPos(pos)
@@ -1604,7 +1605,6 @@ function replay_listener:run()
         self:update()
         monitorUtil.refreshAll()
     elseif self.count > 1 and self.count % 300 == 0 then
-        --commands.execAsync("say " .. fs.getFreeSpace("."))
         self:update()
     end
 end
@@ -2827,7 +2827,6 @@ function attPage:refresh()
     ::continue::
 
     local joyUtil = controllers.activated
-    --commands.execAsync(("say %s"):format(joyUtil))
     local mod = modelist[properties.mode].name
     if info ~= -1 then
         if info.maxColumn > 1 then
@@ -4273,7 +4272,6 @@ function context_pool:refresh(list, target)
         local str = self.list[startPoint + i]
         if str then
             local fStr = #str > self.width and str:sub(1, self.width) or str
-            --commands.execAsync(("say %s"):format(fStr))
             self.window.setCursorPos(self.x, self.y + i)
             if str == self.target then
                 self.window.blit(fStr, genStr(bg, #fStr), genStr(select, #fStr))
@@ -5351,6 +5349,7 @@ end
 ---------broadcast---------
 beat_ct, call_ct, captcha, calling = 5, 0, genCaptcha(), -1
 local shipNet_beat = function() --广播
+    local auto_connect_cd = 0
     while true do
         if not shutdown_flag then
             ---------发送广播---------
@@ -5423,6 +5422,16 @@ local shipNet_beat = function() --广播
                     table.remove(callList, 1)
                 end
             end
+
+            ---------自动连接计时器---------
+            if parentShip.id == -1 and properties.lastParent then --未连接父级且自动连接超时
+                if auto_connect_cd == 0 then
+                    shipNet_p2p_send(properties.lastParent, "call")
+                end
+                auto_connect_cd = auto_connect_cd + 1
+                auto_connect_cd = auto_connect_cd > 5 and 0 or auto_connect_cd
+            end
+            
         end
         sleep(1)
     end
@@ -5490,6 +5499,8 @@ local shipNet_getMessage = function() --从广播中筛选
                         parentShip.preQuat = DEFAULT_PARENT_SHIP.rot
                         parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
                         parentShip.anchorage = DEFAULT_PARENT_SHIP.anchorage
+                        properties.lastParent = id
+                        system:updatePersistentData()
                     else
                         parentShip.id = -1
                     end
