@@ -911,7 +911,9 @@ function flight_control:run(phy)
             frame = self.recordings:play(self.replay_index)
         end
         local pos = frame.pos
-        genParticle(pos.x, pos.y, pos.z)
+        if commands then
+            genParticle(pos.x, pos.y, pos.z)
+        end
         self:gotoPos_PD(frame.pos, 18, 20)
         self:gotoRot_PD(frame.rot, 7, 30)
     else
