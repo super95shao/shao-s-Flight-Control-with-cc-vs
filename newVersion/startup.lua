@@ -1,5 +1,5 @@
 local engine_controller = peripheral.find("EngineController")
-local flight_control, hologram_manager, hologram_prop, controllers, system, properties, monitorUtil, shipNet_p2p_send, scanner, radar
+local flight_control, hologram_manager, hologram_prop, controllers, system, properties, monitorUtil, shipNet_p2p_send, scanner, radar, replay_listener
 local shutdown_flag, engineOff = false, false
 local public_protocol = "shipNet_broadcast"
 local protocol, request_protocol = "CBCNetWork", "CBCcenter"
@@ -409,6 +409,7 @@ system.resetProp = function()
         profileIndex = "keyboard",
         coupled = true,
         drawHoloBorder = true,
+        autoReplay = false,
         radarMode = 1,
         radarFov = 90,
         radarRange = 2048,
@@ -515,10 +516,12 @@ function system:updatePersistentData()
     system.write(self.files.holograms, hologram_prop)
 end
 
-system.write = function(file, obj)
-    system.file = io.open(file, "w")
-    system.file:write(textutils.serialise(obj))
-    system.file:close()
+system.write = function(f, obj)
+    local file = io.open(f, "w")
+    if file then
+        file:write(textutils.serialise(obj))
+        file:close()
+    end
 end
 
 local quat = {}
@@ -731,6 +734,24 @@ function controllers:run()
     end
 end
 
+local abs_recordings = { time = 0, recordings = {}, len = 0 }
+function abs_recordings:play(index)
+    local result = self.recordings[self.time]
+    self.time = self.time + index
+    if properties.autoReplay then
+        self.time = self.time > self.len and 1 or self.time < 1 and self.len or self.time
+    else
+        if self.time >= self.len or self.time <= 1 then
+            flight_control.replay_index = 0
+        end
+    end
+    return result
+end
+
+local new_recordings = function (obj)
+    return setmetatable({ time = 1, recordings = obj, len = #obj }, { __index = abs_recordings })
+end
+
 flight_control = {
     mass = 0,
     omega = newVec(),
@@ -755,6 +776,8 @@ flight_control = {
         {0, -1}, {1, 0}
     },
     faceMatrix = {{0, 1},{-1, 0}},
+    recordings = {},
+    replay_index = 0,
     tmpp = 1 / (math.pi / 2)
 }
 
@@ -796,6 +819,10 @@ end
 
 function flight_control:pd_wolrd_space_control(vec, p, d)
     applyInvariantForce(vec:scale(p):sub(self.velocity:scale(d)):scale(self.mass):unpack())
+end
+
+local genParticle = function(x, y, z)
+    commands.execAsync(string.format("particle minecraft:cloud %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
 end
 
 function flight_control:run(phy)
@@ -860,24 +887,32 @@ function flight_control:run(phy)
 
     self.speed = self.velocity:len()
 
-    if modelist[properties.mode].name == "SpaceShip" then
+    if self.replay_index ~= 0 then
+        local frame = self.recordings:play(self.replay_index)
+        local pos = frame.pos
+        --genParticle(pos.x, pos.y, pos.z)
         self:spaceShip()
-    elseif modelist[properties.mode].name == "QuadFPV" then
-        self:fpv()
-    elseif modelist[properties.mode].name == "Helicopter" then
-        self:helicopter()
-    elseif modelist[properties.mode].name == "ShipCamera" then
-        if parentShip.id ~= -1 then
-            self:ShipCamera()
-        else
+    else
+        if modelist[properties.mode].name == "SpaceShip" then
             self:spaceShip()
+        elseif modelist[properties.mode].name == "QuadFPV" then
+            self:fpv()
+        elseif modelist[properties.mode].name == "Helicopter" then
+            self:helicopter()
+        elseif modelist[properties.mode].name == "ShipCamera" then
+            if parentShip.id ~= -1 then
+                self:ShipCamera()
+            else
+                self:spaceShip()
+            end
+        elseif modelist[properties.mode].name == "ShipFollow" then
+            if parentShip.id ~= -1 then
+                self:ShipFollow()
+            else
+                self:spaceShip()
+            end
         end
-    elseif modelist[properties.mode].name == "ShipFollow" then
-        if parentShip.id ~= -1 then
-            self:ShipFollow()
-        else
-            self:spaceShip()
-        end
+        replay_listener:run()
     end
     
     send_to_childShips()
@@ -999,7 +1034,6 @@ local getFpvThrottle = function(mid, t_exp, x)
     return flag and -result or result
 end
 
-local limitRad = math.rad(60)
 function flight_control:fpv()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
@@ -1058,7 +1092,7 @@ function flight_control:fpv()
         movFor.y = 10 / pp
         movFor.y = movFor.y == math.huge and 10 or movFor.y
         movFor.y = movFor.y - self.velocityRot.y
-        
+
         local newVel = self.velocityRot
         local rotFor = newVec(-newVel.z, 0, newVel.x)
         rotFor:scale(9)
@@ -1067,7 +1101,6 @@ function flight_control:fpv()
         rotFor.z = rotFor.z + math.deg(math.asin(self.pRow.y))
         rotFor.x = math.abs(rotFor.x) > 90 and copysign(90, rotFor.x) or rotFor.x
         rotFor.z = math.abs(rotFor.z) > 90 and copysign(90, rotFor.z) or rotFor.z
-        --commands.execAsync(("say %d, %d"):format(rotFor.x, rotFor.z))
 
         applyRotDependentTorque(rotFor:scale(2):sub(self.omega:scale(30)):scale(self.momentOfInertiaTensor[1][1]):unpack())
     end
@@ -1496,6 +1529,55 @@ function radar:run()
 end
 
 --------------------------------------------------
+replay_listener = { isRunning = false, fileDir = "nil", rec = nil, count = 0, timeFlag = 0, cd = 0}
+function replay_listener:check()
+    local disk = peripheral.find("drive")
+    if disk then
+        self.isRunning = not self.isRunning
+        if self.isRunning then
+            local date = os.date("%y%m%d_%H%M%S")
+            self.fileDir = "/disk/recordings/" .. date
+            disk.setDiskLabel(date)
+            fs.makeDir(self.fileDir)
+            self.timeFlag = os.epoch("local")
+            self.cd = 3
+            self.rec = {}
+        else
+            self:update()
+        end
+        
+        self.count = 0
+    end
+end
+
+function replay_listener:update()
+    local fName = self.fileDir .. "/" .. os.date("%H%M%S") .. ".rec"
+    system.write(fName, self.rec)
+    self.rec = {}
+end
+
+function replay_listener:run()
+    if not self.isRunning then
+        return
+    end
+    table.insert(self.rec, { pos = flight_control.pos, rot = flight_control.rot })
+    if self.cd < 3 then
+        self.cd = math.floor((os.epoch("local") - self.timeFlag) / 1000)
+    else
+        self.count = self.count + 1
+    end
+   
+    if self.count >= 3600 or fs.getFreeSpace(".") < 80000 then
+        self:check()
+        self:update()
+        monitorUtil.refreshAll()
+    elseif self.count > 1 and self.count % 300 == 0 then
+        --commands.execAsync("say " .. fs.getFreeSpace("."))
+        self:update()
+    end
+end
+
+--------------------------------------------------
 local jizhi_7x7_fonts = {
 _4f60 = {
     0,1,0,1,0,0,0,0,1,0,1,1,1,1,1,1,1,0,1,0,1,0,1,0,0,1,0,0,0,1,0,1,1,1,0,0,1,1,0,1,0,1,0,1,0,1,1,0,0,},
@@ -1754,16 +1836,16 @@ function absHoloGram:init()
     self.cannonCountPos = new2dVec(-0.9, self.cannon_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.targetPos = new2dVec(0, self.target_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     local per_pix_for_pers = 1 / self.midPoint.y
-    local hp_h = copysign(math.abs(self.target_bar_offset) + 6 * per_pix_for_pers, self.target_bar_offset)
+    local hp_h = copysign(math.abs(self.target_bar_offset) + 2 * per_pix_for_pers, self.target_bar_offset)
     self.hp_pos_start = new2dVec(-0.3, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     self.hp_pos_end = new2dVec(0.3, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     self.hp_bar_len = 0.6
-    self.hp_text_start = new2dVec(-0.3 - 12 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
-    self.hp_text_end = new2dVec(0.3 + 12 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
+    self.hp_text_start = new2dVec(-0.3 - 8 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
+    self.hp_text_end = new2dVec(0.3 + 8 * per_pix_for_pers, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     
-    self.ThrottlePos = new2dVec(0.4, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
-    self.ThrottleFontPos = new2dVec(0.4 + 20 * per_pix_for_pers, self.msg_bar_offset + 2 * per_pix_for_pers):scaleVec(self.midPoint):add(self.midPoint)
-    self.holdingPos = new2dVec(-0.4, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
+    self.ThrottlePos = new2dVec(0.5, self.msg_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
+    self.ThrottleFontPos = new2dVec(0.5 + 20 * per_pix_for_pers, self.msg_bar_offset + 2 * per_pix_for_pers):scaleVec(self.midPoint):add(self.midPoint)
+    self.holdingPos = new2dVec(-0.8, self.msg_bar_offset - 12 * per_pix_for_pers):scaleVec(self.midPoint):add(self.midPoint)
 
     self.borders = { full = new2dVec(0, 0), attBorder = self.attBorder }
     for k, v in pairs(self.borders) do
@@ -4137,6 +4219,60 @@ function set_home:onTouch(x, y)
     self:subPage_Back(x, y)
 end
 
+local context_pool = {}
+function context_pool:refresh(list, target)
+    local font, bg, other, select = properties.font, properties.bg, properties.other, properties.select
+    self.list = list
+    local max_n = self.height - 2
+    self.max_page = math.ceil(#self.list / max_n)
+    local startPoint = self.pageIndex == 1 and 0 or (self.pageIndex - 1) * max_n
+    for i = 1, max_n, 1 do
+        local str = self.list[startPoint + i]
+        if str then
+            local fStr = #str > self.width and str:sub(1, self.width) or str
+            --commands.execAsync(("say %s"):format(fStr))
+            self.window.setCursorPos(self.x, self.y + i)
+            if str == self.target then
+                self.window.blit(fStr, genStr(bg, #fStr), genStr(select, #fStr))
+            else
+                self.window.blit(fStr, genStr(font, #fStr), genStr(bg, #fStr))
+            end
+        else
+            break
+        end
+    end
+
+    if self.pageIndex == 1 and self.max_page > 1 then
+        self.window.setCursorPos(self.x, self.y + self.height - 1)
+        self.window.blit(self.next, genStr(bg, #self.next), genStr(other, #self.next))
+    end
+
+    if self.max_page > 1 and self.pageIndex > 1 then
+        self.window.setCursorPos(self.x, self.y)
+        self.window.blit(self.pre, genStr(bg, #self.pre), genStr(other, #self.pre))
+    end
+end
+
+function context_pool:click(x, y)
+    if y == self.y then
+        self.pageIndex = self.pageIndex - 1 < 1 and self.max_page or self.pageIndex - 1
+    elseif y == self.y + self.height - 1 then
+        self.pageIndex = self.pageIndex + 1 > self.max_page and 1 or self.pageIndex + 1
+    else
+        local max_n = self.height - 2
+        local startPoint = self.pageIndex == 1 and 0 or (self.pageIndex - 1) * max_n
+        self.target = self.list[startPoint + (y - self.y)]
+    end
+end
+
+local new_context_pool = function(window, width, height, x, y)
+    local ww = width % 2 == 0 and width / - 1 or width
+    local half = genStr(" ", math.floor(ww / 2))
+    local preButton = half .. "^" .. half
+    local nextButton = half .. "v" .. half
+    return setmetatable({ window = window, width = width, height = height, x = x, y = y, pre = preButton, next = nextButton, pageIndex = 1 }, {__index = context_pool})
+end
+
 --winIndex = 26
 function recordings:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
@@ -4144,19 +4280,104 @@ function recordings:init()
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
         { text = "REC", x = 2, y = 10, blitF = "eee", blitB = "fff" },
-        { text = "[|]", x = 6, y = 10, blitF = "ddd", blitB = "fff" },
-        { text = "[>]", x = 12, y = 10, blitF = "000", blitB = "fff" }
+        { text = "[<]", x = 6, y = 10, blitF = "8b8", blitB = "fff" },
+        { text = "[>]", x = 13, y = 10, blitF = "8d8", blitB = "fff" }
     }
+    self.delButton = { text = "[x]", x = 13, y = 1, blitF = "eee", blitB = "fff" }
+    self.pool = new_context_pool(self.window, 13, 7, 2, 2)
 end
 
 function recordings:refresh()
-    self:refreshButtons()
-    self:refreshTitle()
+    if replay_listener.isRunning then
+        self.window.clear()
+        self.window.setCursorPos(3, 5)
+        self.window.blit("recording..", "ddddddddddd", "fffffffffff")
+        self.window.setCursorPos(2, 7)
+        self.window.blit("Touch to stop", "ddddddddddddd", "fffffffffffff")
+    else
+        self:refreshButtons()
+        self:refreshTitle()
+        self.window.setCursorPos(11, 10)
+        if properties.autoReplay then
+            self.window.blit("A", "8", "f")
+        else
+            self.window.blit("N", "8", "f")
+        end
+
+        local disk = peripheral.find("drive")
+        if disk and disk.getMountPath() then
+            if self.pool.target then
+                self.window.setCursorPos(self.delButton.x, self.delButton.y)
+                self.window.blit(self.delButton.text, self.delButton.blitF, self.delButton.blitB)
+            end
+            local len = math.floor((1 - fs.getFreeSpace("disk") / fs.getCapacity("disk")) * 13 + 0.5)
+            self.window.setCursorPos(2, 9)
+            self.window.blit(genStr(" ", len), genStr("f", len), genStr("5", len))
+            len = 13 - len
+            self.window.blit(genStr(" ", len), genStr("f", len), genStr("8", len))
+            local records = fs.find("disk/recordings/*")
+            local list = {}
+            for k, v in pairs(records) do
+                local name = split(v, "/")[3]
+                table.insert(list, name)
+            end
+            self.pool:refresh(list)
+        else
+            self.window.setCursorPos(2, 6)
+            self.window.blit("No Disk", "eeeeeee", "fffffff")
+        end
+    end
+end
+
+local load_recordings = function(path)
+    local records = fs.find(path.."/*.rec")
+    local result = {}
+    local fi = 1
+    for k, v in pairs(records) do
+        local f = io.open(v, "r")
+        local obj = textutils.unserialise(f:read("a"))
+        f:close()
+        if fi == 1 then
+            result = obj
+        else
+            for i = 1, #obj, 1 do
+                table.insert(result, obj[i])
+            end
+        end
+        fi = fi + 1
+    end
+    --commands.execAsync(("say len %s"):format(#result))
+    return result
 end
 
 function recordings:onTouch(x, y)
     self:subPage_Back(x, y)
-    
+    if y > 2 and replay_listener.isRunning then
+        replay_listener:check()
+    else
+        if y == 10 then
+            if x < 6 then
+                replay_listener:check()
+            elseif x < 9 then
+                flight_control.replay_index = flight_control.replay_index == -1 and 0 or -1
+                if self.pool.target and flight_control.replay_index == -1 then
+                    flight_control.recordings = new_recordings(load_recordings("disk/recordings/"..self.pool.target))
+                end
+            elseif x < 13 then
+                properties.autoReplay = not properties.autoReplay
+            else
+                flight_control.replay_index = flight_control.replay_index == 1 and 0 or 1
+                if self.pool.target and flight_control.replay_index == 1 then
+                    flight_control.recordings = new_recordings(load_recordings("disk/recordings/"..self.pool.target))
+                end
+            end
+        elseif y > 1 and y < 10 then
+            self.target = self.pool:click(x, y)
+        elseif y == 1 and x > 12 and self.pool.target then
+            fs.delete("disk/recordings/"..self.pool.target)
+            self.pool.target = nil
+        end
+    end
 end
 
 --winIndex = 12
@@ -5335,30 +5556,34 @@ local run_event = function ()
         local event = eventData[1]
         if event == "phys_tick" then
             flight_control:run(eventData[2])
-        end
-
-        if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
-            if shutdown_flag then
-                local m = monitorUtil.screens[eventData[2]].monitor
-                local x, y = m.getSize()
-                if eventData[4] == y / 2 and eventData[3] >= x / 2 - 7 and eventData[3] <= x / 2 + 9 then
-                    os.reboot()
+        else
+            if event == "monitor_touch" and monitorUtil.screens[eventData[2]] then
+                if shutdown_flag then
+                    local m = monitorUtil.screens[eventData[2]].monitor
+                    local x, y = m.getSize()
+                    if eventData[4] == y / 2 and eventData[3] >= x / 2 - 7 and eventData[3] <= x / 2 + 9 then
+                        os.reboot()
+                    end
                 end
+                monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
+                for k, screen in pairs(monitorUtil.screens) do
+                    screen:refresh()
+                end
+                system:updatePersistentData()
+            elseif event == "mouse_click" and monitorUtil.screens["computer"] then
+                monitorUtil.screens["computer"]:onTouch(eventData[3], eventData[4])
+                for k, screen in pairs(monitorUtil.screens) do
+                    screen:refresh()
+                end
+                system:updatePersistentData()
+            elseif event == "key" and not tableHasValue(properties.enabledMonitors, "computer") then
+                table.insert(properties.enabledMonitors, "computer")
+                system:updatePersistentData()
+            elseif event == "peripheral" or event == "disk" or event == "disk_eject" then
+                controllers:getAll()
+                hologram_manager:initAll()
+                monitorUtil.refreshAll()
             end
-            monitorUtil.screens[eventData[2]]:onTouch(eventData[3], eventData[4])
-            for k, screen in pairs(monitorUtil.screens) do
-                screen:refresh()
-            end
-            system:updatePersistentData()
-        elseif event == "mouse_click" and monitorUtil.screens["computer"] then
-            monitorUtil.screens["computer"]:onTouch(eventData[3], eventData[4])
-            for k, screen in pairs(monitorUtil.screens) do
-                screen:refresh()
-            end
-            system:updatePersistentData()
-        elseif event == "key" and not tableHasValue(properties.enabledMonitors, "computer") then
-            table.insert(properties.enabledMonitors, "computer")
-            system:updatePersistentData()
         end
     end
 end
