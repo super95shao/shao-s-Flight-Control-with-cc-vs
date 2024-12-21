@@ -734,22 +734,34 @@ function controllers:run()
     end
 end
 
+local teleport_ccvs = function(frame)
+    ship.teleport({pos = frame.pos, rot = frame.rot})
+end
+
 local abs_recordings = { time = 0, recordings = {}, len = 0 }
 function abs_recordings:play(index)
     local result = self.recordings[self.time]
     self.time = self.time + index
     if properties.autoReplay then
+        if self.time > self.len then
+            self.time = 1
+            teleport_ccvs(self.recordings[self.time])
+        elseif self.time < 1 then
+            self.time = self.len
+            teleport_ccvs(self.recordings[self.time])
+        end
         self.time = self.time > self.len and 1 or self.time < 1 and self.len or self.time
     else
-        if self.time >= self.len or self.time <= 1 then
+        if self.time > self.len or self.time < 1 then
+            self.time = self.time > self.len and 1 or self.time < 1 and self.len or self.time
             flight_control.replay_index = 0
         end
     end
     return result
 end
 
-local new_recordings = function (obj)
-    return setmetatable({ time = 1, recordings = obj, len = #obj }, { __index = abs_recordings })
+local new_recordings = function (name, obj)
+    return setmetatable({ name = name, time = 1, recordings = obj, len = #obj, waiting = true }, { __index = abs_recordings })
 end
 
 flight_control = {
@@ -818,7 +830,7 @@ function flight_control:pd_mov_control(vec, p, d)
 end
 
 function flight_control:pd_wolrd_space_control(vec, p, d)
-    applyInvariantForce(vec:scale(p):sub(self.velocity:scale(d)):scale(self.mass):unpack())
+    applyInvariantForce(vec:scale(p):sub(self.velocity:scale(d)):add(newVec(0, 10, 0)):scale(self.mass):unpack())
 end
 
 local genParticle = function(x, y, z)
@@ -888,10 +900,20 @@ function flight_control:run(phy)
     self.speed = self.velocity:len()
 
     if self.replay_index ~= 0 then
-        local frame = self.recordings:play(self.replay_index)
+        local frame
+        if self.recordings.waiting then
+            frame = self.recordings.recordings[1]
+            local err = newVec(frame.pos):sub(self.pos)
+            if math.abs(err.x) + math.abs(err.y) + math.abs(err.z) < 0.1 then
+                self.recordings.waiting = false
+            end
+        else
+            frame = self.recordings:play(self.replay_index)
+        end
         local pos = frame.pos
-        --genParticle(pos.x, pos.y, pos.z)
-        self:spaceShip()
+        genParticle(pos.x, pos.y, pos.z)
+        self:gotoPos_PD(frame.pos, 18, 20)
+        self:gotoRot_PD(frame.rot, 7, 30)
     else
         if modelist[properties.mode].name == "SpaceShip" then
             self:spaceShip()
@@ -1205,9 +1227,9 @@ function flight_control:gotoPos(pos)
 end
 
 function flight_control:gotoPos_PD(pos, p, d)
-    local tg = self.pos:copy():sub(pos)
+    local tg = newVec(pos):sub(self.pos)
     tg = tg:len() > 299 and tg:norm():scale(299) or tg
-    self:pd_wolrd_space_control(tg:nega():scale(10):add(newVec(0, 10, 0)), p, d)
+    self:pd_wolrd_space_control(tg:scale(10), p, d)
 end
 
 function flight_control:gotoRot(rot)
@@ -1529,7 +1551,7 @@ function radar:run()
 end
 
 --------------------------------------------------
-replay_listener = { isRunning = false, fileDir = "nil", rec = nil, count = 0, timeFlag = 0, cd = 0}
+replay_listener = { isRunning = false, fileDir = "nil", rec = nil, count = 0, timeFlag = 0, cd = 0, lastCD = 0}
 function replay_listener:check()
     local disk = peripheral.find("drive")
     if disk then
@@ -1540,7 +1562,7 @@ function replay_listener:check()
             disk.setDiskLabel(date)
             fs.makeDir(self.fileDir)
             self.timeFlag = os.epoch("local")
-            self.cd = 3
+            self.cd = 0
             self.rec = {}
         else
             self:update()
@@ -1560,20 +1582,43 @@ function replay_listener:run()
     if not self.isRunning then
         return
     end
-    table.insert(self.rec, { pos = flight_control.pos, rot = flight_control.rot })
     if self.cd < 3 then
         self.cd = math.floor((os.epoch("local") - self.timeFlag) / 1000)
+        if self.cd ~= self.lastCD then
+            self:refreshMonitor()
+        end
+        self.lastCD = self.cd
     else
+        if self.cd == 3 then
+            self:refreshMonitor()
+            self.cd = 4
+        end
+        table.insert(self.rec, { pos = flight_control.pos, rot = flight_control.rot })
         self.count = self.count + 1
     end
    
-    if self.count >= 3600 or fs.getFreeSpace(".") < 80000 then
+    if self.count >= 3600 and fs.getFreeSpace(".") < 80000 then
         self:check()
         self:update()
         monitorUtil.refreshAll()
     elseif self.count > 1 and self.count % 300 == 0 then
         --commands.execAsync("say " .. fs.getFreeSpace("."))
         self:update()
+    end
+end
+
+function replay_listener:refreshMonitor()
+    for n, screen in pairs(monitorUtil.screens) do
+        if screen.windows then
+            for i = 1, #screen.windows, 1 do
+                for j = 1, #screen.windows[i], 1 do
+                    local page = properties.winIndex[n][i][j]
+                    if page == 26 then
+                        screen.windows[i][j][page]:refresh()
+                    end
+                end
+            end
+        end
     end
 end
 
@@ -1954,10 +1999,6 @@ function absHoloGram:refresh()
     --self.screen.DrawLine(self.midPoint.x, 0, self.midPoint.x, self.height, 0x33FFFFFF)
     --self:draw_number(new2dVec(1,1), math.floor(flight_control.pitch * 100))
     self.screen.Flush()
-end
-
-local genParticle = function(x, y, z)
-    commands.execAsync(string.format("particle electric_spark %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
 end
 
 local holoOffset = newVec(0, 1, 0)
@@ -4290,8 +4331,14 @@ end
 function recordings:refresh()
     if replay_listener.isRunning then
         self.window.clear()
-        self.window.setCursorPos(3, 5)
-        self.window.blit("recording..", "ddddddddddd", "fffffffffff")
+        if replay_listener.cd < 3 then
+            self.window.setCursorPos(3, 5)
+            self.window.blit(3 - replay_listener.cd .. " s to start", "dddddddddddd", "ffffffffffff")
+        else
+            self.window.setCursorPos(3, 5)
+            self.window.blit("recording..", "ddddddddddd", "fffffffffff")
+        end
+        
         self.window.setCursorPos(2, 7)
         self.window.blit("Touch to stop", "ddddddddddddd", "fffffffffffff")
     else
@@ -4346,7 +4393,6 @@ local load_recordings = function(path)
         end
         fi = fi + 1
     end
-    --commands.execAsync(("say len %s"):format(#result))
     return result
 end
 
@@ -4361,14 +4407,18 @@ function recordings:onTouch(x, y)
             elseif x < 9 then
                 flight_control.replay_index = flight_control.replay_index == -1 and 0 or -1
                 if self.pool.target and flight_control.replay_index == -1 then
-                    flight_control.recordings = new_recordings(load_recordings("disk/recordings/"..self.pool.target))
+                    if flight_control.recordings.name ~= self.pool.target then
+                        flight_control.recordings = new_recordings(self.pool.target, load_recordings("disk/recordings/"..self.pool.target))
+                    end
                 end
             elseif x < 13 then
                 properties.autoReplay = not properties.autoReplay
             else
                 flight_control.replay_index = flight_control.replay_index == 1 and 0 or 1
                 if self.pool.target and flight_control.replay_index == 1 then
-                    flight_control.recordings = new_recordings(load_recordings("disk/recordings/"..self.pool.target))
+                    if flight_control.recordings.name ~= self.pool.target then
+                        flight_control.recordings = new_recordings(self.pool.target, load_recordings("disk/recordings/"..self.pool.target))
+                    end
                 end
             end
         elseif y > 1 and y < 10 then
@@ -5230,7 +5280,7 @@ monitorUtil.refresh = function()
                     end
                 end
             end
-        else
+        elseif screen.step then
             screen:refresh()
         end
     end
@@ -5631,6 +5681,7 @@ local run_Controllers = function ()
 end
 
 local run = function ()
+    flight_control.lastPos = engine_controller.getPosition()
     parallel.waitForAll(run_event, run_radar, run_fire_control, run_Controllers, run_hologram, shipNet_run)
 end
 
