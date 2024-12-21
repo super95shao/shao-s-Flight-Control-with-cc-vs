@@ -420,6 +420,7 @@ system.resetProp = function()
         shipNet_whiteList = {},
         spaceShipThrottle = 3,
         lastParent = -1,
+        canTeleport = false,
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -446,7 +447,7 @@ system.resetProp = function()
                 helicopt_MAX_ANGLE = 50,
                 helicopt_ACC = 0.5,
                 helicopt_ACC_D = 0.75,
-                airShip_ROT_P = 1,
+                airShip_ROT_P = 0.5,
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 0.2,
@@ -478,7 +479,7 @@ system.resetProp = function()
                 helicopt_MAX_ANGLE = 50,
                 helicopt_ACC = 0.5,
                 helicopt_ACC_D = 0.75,
-                airShip_ROT_P = 1,
+                airShip_ROT_P = 0.5,
                 airShip_ROT_D = 0.5,
                 airShip_MOVE_P = 1,
                 camera_rot_speed = 1,
@@ -744,14 +745,21 @@ function abs_recordings:play(index)
     local result = self.recordings[self.time]
     self.time = self.time + index
     if properties.autoReplay then
-        if self.time > self.len then
-            self.time = 1
-            teleport_ccvs(self.recordings[self.time])
-        elseif self.time < 1 then
-            self.time = self.len
-            teleport_ccvs(self.recordings[self.time])
+        if properties.canTeleport then
+            if self.time > self.len then
+                self.time = 1
+                teleport_ccvs(self.recordings[self.time])
+            elseif self.time < 1 then
+                self.time = self.len
+                teleport_ccvs(self.recordings[self.time])
+            end
+        else
+            if self.time > self.len or self.time < 1 then
+                self.time = self.time - index
+                flight_control.replay_index = -flight_control.replay_index
+            end
         end
-        self.time = self.time > self.len and 1 or self.time < 1 and self.len or self.time
+        
     else
         if self.time > self.len or self.time < 1 then
             self.time = self.time > self.len and 1 or self.time < 1 and self.len or self.time
@@ -924,15 +932,17 @@ function flight_control:run(phy)
             self:fpv()
         elseif modelist[properties.mode].name == "Helicopter" then
             self:helicopter()
+        elseif modelist[properties.mode].name == "AirShip" then
+            self:airShip()
         elseif modelist[properties.mode].name == "ShipCamera" then
             if parentShip.id ~= -1 then
-                self:ShipCamera()
+                self:shipCamera()
             else
                 self:spaceShip()
             end
         elseif modelist[properties.mode].name == "ShipFollow" then
             if parentShip.id ~= -1 then
-                self:ShipFollow()
+                self:shipFollow()
             else
                 self:spaceShip()
             end
@@ -943,12 +953,15 @@ function flight_control:run(phy)
     send_to_childShips()
 end
 
+function flight_control:getCtAndProfile()
+    return controllers.activated, properties.profile[properties.profileIndex]
+end
+
 local press_ct_1 = 0
 function flight_control:spaceShip()
     dimension = coordinate.getSelfDimensionType()
     local movFor, rotFor = newVec(), newVec()
-    local ct = controllers.activated
-    local profile = properties.profile[properties.profileIndex]
+    local ct, profile = self:getCtAndProfile()
     
     if properties.lock then
         self:gotoPos(self.lastPos)
@@ -1060,8 +1073,7 @@ local getFpvThrottle = function(mid, t_exp, x)
 end
 
 function flight_control:fpv()
-    local ct = controllers.activated
-    local profile = properties.profile[properties.profileIndex]
+    local ct, profile = self:getCtAndProfile()
 
     local velocity_tick = self.velocity:copy():scale(0.01666666666666666666666666666667)
     local damping = newVec(velocity_tick.x ^ 2, velocity_tick.y ^ 2, velocity_tick.z ^ 2)
@@ -1135,12 +1147,10 @@ function flight_control:fpv()
 end
 
 function flight_control:helicopter()
-    local ct = controllers.activated
-    local profile = properties.profile[properties.profileIndex]
+    local ct, profile = self:getCtAndProfile()
 
     local movFor = newVec()
     local rot
-    --local localPoint = quat.vecRot(self.rot, newVec(1, 0, 0))
     local localYaw = math.atan2(self.pRow.z, self.pRow.x)
     if ct then
         local max_ag = math.rad(profile.helicopt_MAX_ANGLE) * 2 / math.pi
@@ -1158,9 +1168,26 @@ function flight_control:helicopter()
     self:pd_mov_control(movFor, 1, 0.05)
 end
 
+function flight_control:airShip()
+    local ct, profile = self:getCtAndProfile()
+    local movFor = newVec()
+    local rot
+    local localYaw = math.atan2(self.pRow.z, self.pRow.x)
+    if ct then
+        rot = self:genRotByEuler(0, resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 32), 0)
+        movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.airShip_MOVE_P + -flight_control.velocityRot.y
+        movFor.x = math.deg(math.asin(ct.BTStickRot.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
+    else
+        rot = self:genRotByEuler(0, localYaw, 0)
+    end
+    self:gotoRot_PD(rot, profile.airShip_ROT_P, profile.airShip_ROT_D * 5)
+    movFor.y = movFor.y + 10
+    self:pd_mov_control(movFor, 1, 1)
+end
+
 local cameraQuat = quat.new()
 local xOffset = 0
-function flight_control:ShipCamera()
+function flight_control:shipCamera()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
 
@@ -1213,7 +1240,7 @@ function flight_control:ShipCamera()
     self:gotoPos_PD(pos, 6, 18)
 end
 
-function flight_control:ShipFollow()
+function flight_control:shipFollow()
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local offset = newVec(properties.shipFollow_offset)
     offset.x = offset.x + parentShip.size.x + flight_control.size.x
