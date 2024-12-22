@@ -18,7 +18,7 @@ local modelist = {
     { name = "Hms_Fly",    flag = false },
     { name = "Follow",     flag = false },
     { name = "GoHome",     flag = false },
-    { name = "PointLoop ", flag = false },
+    { name = "PathFollow", flag = false },
     { name = "ShipCamera", flag = false },
     { name = "ShipFollow", flag = false },
     { name = "Anchorage",  flag = false },
@@ -421,6 +421,7 @@ system.resetProp = function()
         spaceShipThrottle = 3,
         lastParent = -1,
         canTeleport = false,
+        pathRange = 0,
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -499,7 +500,6 @@ system.resetProp = function()
         select = "3",
         other = "7",
         MAX_MOVE_SPEED = 99,                    --自动驾驶最大跟随速度
-        pointLoopWaitTime = 60,                 --点循环模式-到达目标点后等待时间 (tick)
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         shipFollow_offset = { x = -3, y = 0, z = 0 },
         pointList = {                           --点循环模式，按照顺序逐个前往
@@ -773,6 +773,10 @@ local new_recordings = function (name, obj)
     return setmetatable({ name = name, time = 1, recordings = obj, len = #obj, waiting = true }, { __index = abs_recordings })
 end
 
+local genParticle = function(x, y, z)
+    commands.execAsync(string.format("particle minecraft:cloud %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+end
+
 flight_control = {
     mass = 0,
     omega = newVec(),
@@ -799,6 +803,7 @@ flight_control = {
     faceMatrix = {{0, 1},{-1, 0}},
     recordings = {},
     replay_index = 0,
+    followPath = {},
     tmpp = 1 / (math.pi / 2)
 }
 
@@ -810,23 +815,77 @@ local getWorldOffsetOfPcPos = function(v)
     return wPos:sub(offset)
 end
 
-local send_to_childShips = function()
-    if #childShips > 0 then
+function flight_control:send_to_childShips()
+    local followPoint = flight_control.lastFollowPoint
+    if #self.followPath > 0 then
+        local prePos = newVec(self.followPath[1].pos)
+        local len = prePos:sub(self.pos):len()
+        if len > 0.1 then
+            table.insert(self.followPath, 1, { pos = newVec(self.pos), rot = newQuat(self.rot)})
+        end
+
+        --local range = (self.shipLength + properties.pathRange) * 10 
+        --followPoint.pos = newVec(self.pX):nega():scale(self.shipLength + properties.pathRange):add(self.pos)
+        --if #self.followPath > range then
+        --    --commands.execAsync("say ".. #self.followPath)
+        --    local lastPoint = self.followPath[range]
+        --    if lastPoint then
+        --        followPoint.rot = lastPoint.rot
+        --        self.followPath[range] = nil
+        --    end
+        --end
+        
+        -- 帧范围
+        local range = (self.shipLength + properties.pathRange) * 10
+        if #self.followPath >= range then
+            local lastPoint = self.followPath[range]
+            if lastPoint then
+                followPoint.pos = lastPoint.pos
+                followPoint.rot = lastPoint.rot
+            end
+            local len2 = #self.followPath - range
+            for i = 1, len2, 1 do
+                self.followPath[range] = nil
+            end
+        end
+
+        --while true do --球形范围
+        --    local lastPoint = self.followPath[#self.followPath]
+        --    if newVec(lastPoint.pos):sub(self.pos):len() > self.shipLength + properties.pathRange then
+        --        followPoint = { pos = lastPoint.pos, rot = lastPoint.rot }
+        --        self.followPath[#self.followPath] = nil
+        --    else
+        --        break
+        --    end
+        --end
+        --commands.execAsync("say ".. #self.followPath)
+    else
+        table.insert(self.followPath, { pos = newVec(self.pos), rot = newQuat(self.rot)})
+        followPoint = {
+            pos = newVec(self.pX):nega():scale(self.shipLength):add(self.pos),
+            rot = newQuat(self.rot),
+        }
+    end
+    --genParticle(followPoint.pos.x, followPoint.pos.y, followPoint.pos.z)
+    local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
+    local msg = {
+        id = computerId,
+        name = shipName,
+        pos = newVec(self.pos),
+        rot = newQuat(self.rot),
+        preRot = newQuat(self.preRot),
+        velocity = newVec(self.velocity),
+        size = newVec(self.size),
+        anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
+        followPoint = followPoint,
+    }
+
+    if followPoint then
         for k, v in pairs(childShips) do
-            local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
-            local msg = {
-                id = computerId,
-                name = shipName,
-                pos = newVec(flight_control.pos),
-                rot = newQuat(flight_control.rot_face),
-                preRot = newQuat(flight_control.preRot),
-                velocity = newVec(flight_control.velocity),
-                size = newVec(flight_control.size),
-                anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
-                code = v.code
-            }
+            msg.code = v.code
             rednet.send(v.id, msg, public_protocol)
         end
+        flight_control.lastFollowPoint = followPoint
     end
 end
 
@@ -835,15 +894,11 @@ function flight_control:pd_rot_control(vec, p, d)
 end
 
 function flight_control:pd_mov_control(vec, p, d)
-    applyRotDependentForce(vec:scale(p):sub(self.velocityRot:scale(d)):scale(self.mass):unpack())
+    applyRotDependentForce(vec:scale(p):sub(newVec(self.velocityRot):scale(d)):scale(self.mass):unpack())
 end
 
 function flight_control:pd_wolrd_space_control(vec, p, d)
-    applyInvariantForce(vec:scale(p):sub(self.velocity:scale(d)):add(newVec(0, 10, 0)):scale(self.mass):unpack())
-end
-
-local genParticle = function(x, y, z)
-    commands.execAsync(string.format("particle minecraft:cloud %0.6f %0.6f %0.6f 0 0 0 0 0 force", x, y, z))
+    applyInvariantForce(vec:scale(p):sub(newVec(self.velocity):scale(d)):add(newVec(0, 10, 0)):scale(self.mass):unpack())
 end
 
 function flight_control:run(phy)
@@ -888,7 +943,7 @@ function flight_control:run(phy)
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
     --self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
 
-    local yaw_rot = -math.atan2(rowPoint.z, rowPoint.x) / 2
+    local yaw_rot = -math.atan2(rowPoint.z, -rowPoint.x) / 2
     self.q_yaw = {
         w = math.cos(yaw_rot),
         x = 0,
@@ -896,7 +951,7 @@ function flight_control:run(phy)
         z = 0,
     }
 
-    self.rot_face = quat.multiply(self.rot, self.q_yaw)
+    self.rot_face = quat.multiply(self.q_yaw, self.rot)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
@@ -905,6 +960,8 @@ function flight_control:run(phy)
     self.omega_raw = self.omega
     self.omega = quat.vecRot(rot_nega, self.omega)
     self.size = engine_controller.getSize()
+    self.sizeRot = matrixMultiplication_3d(self.faceMatrix3d, self.size)
+    self.shipLength = math.abs(self.sizeRot.x)
 
     self.speed = self.velocity:len()
 
@@ -924,7 +981,7 @@ function flight_control:run(phy)
             genParticle(pos.x, pos.y, pos.z)
         end
         self:gotoPos_PD(frame.pos, 18, 20)
-        self:gotoRot_PD(frame.rot, 7, 30)
+        self:gotoRot_PD(frame.rot, 7, 30, true)
     else
         if modelist[properties.mode].name == "SpaceShip" then
             self:spaceShip()
@@ -934,15 +991,19 @@ function flight_control:run(phy)
             self:helicopter()
         elseif modelist[properties.mode].name == "AirShip" then
             self:airShip()
-        elseif modelist[properties.mode].name == "ShipCamera" then
+        elseif modelist[properties.mode].name == "Hms_Fly" then
+            self:hms_fly()
+        elseif modelist[properties.mode].name == "PathFollow"
+        or modelist[properties.mode].name == "ShipCamera"
+        or modelist[properties.mode].name == "ShipFollow" then
             if parentShip.id ~= -1 then
-                self:shipCamera()
-            else
-                self:spaceShip()
-            end
-        elseif modelist[properties.mode].name == "ShipFollow" then
-            if parentShip.id ~= -1 then
-                self:shipFollow()
+                if modelist[properties.mode].name == "PathFollow" then
+                    self:PathFollow()
+                elseif modelist[properties.mode].name == "ShipCamera" then
+                    self:shipCamera()
+                else
+                    self:shipFollow()
+                end
             else
                 self:spaceShip()
             end
@@ -950,7 +1011,9 @@ function flight_control:run(phy)
         replay_listener:run()
     end
     
-    send_to_childShips()
+    if #childShips > 0 then
+        self:send_to_childShips()
+    end
 end
 
 function flight_control:getCtAndProfile()
@@ -1240,6 +1303,16 @@ function flight_control:shipCamera()
     self:gotoPos_PD(pos, 6, 18)
 end
 
+function flight_control:PathFollow()
+    local frame = parentShip.followPoint
+    if frame then
+        self:gotoPos_PD(frame.pos, 20, 18)
+        self:gotoRot_PD(frame.rot, 9, 26, true)
+    else
+        self:spaceShip()
+    end
+end
+
 function flight_control:shipFollow()
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local offset = newVec(properties.shipFollow_offset)
@@ -1266,8 +1339,13 @@ function flight_control:gotoRot(rot)
     self:gotoRot_PD(rot, 1, 18)
 end
 
-function flight_control:gotoRot_PD(rot, p, d)
-    local selfRot = newQuat(self.rot.w, self.rot.x, self.rot.y, self.rot.z)
+function flight_control:gotoRot_PD(rot, p, d, srr)
+    local selfRot
+    if srr then
+        selfRot = newQuat(self.rot_face.w, self.rot_face.x, self.rot_face.y, self.rot_face.z)
+    else
+        selfRot = newQuat(self.rot.w, self.rot.x, self.rot.y, self.rot.z)
+    end
     local xp, zp = quat.vecRot(selfRot, newVec(1, 0, 0)), quat.vecRot(selfRot, newVec(0, 0, 1))
     xp = quat.vecRot(quat.nega(rot), xp)
     zp = quat.vecRot(quat.nega(rot), zp)
@@ -2588,7 +2666,7 @@ local set_airShip          = setmetatable({ pageId = 8, pageName = "set_airShip"
 local set_user             = setmetatable({ pageId = 9,  pageName = "user_Change" }, { __index = abstractWindow })
 local set_home             = setmetatable({ pageId = 10, pageName = "home_set" }, { __index = abstractWindow })
 local set_simulate         = setmetatable({ pageId = 11, pageName = "simulate" }, { __index = abstractWindow })
-local set_att              = setmetatable({ pageId = 12, pageName = "set_att" }, { __index = abstractWindow })
+local set_other            = setmetatable({ pageId = 12, pageName = "set_other" }, { __index = abstractWindow })
 local set_profile          = setmetatable({ pageId = 13, pageName = "profile" }, { __index = abstractWindow })
 local set_colortheme       = setmetatable({ pageId = 14, pageName = "colortheme" }, { __index = abstractWindow })
 local shipNet_set_Page     = setmetatable({ pageId = 15, pageName = "shipNet_set" }, { __index = abstractWindow })
@@ -2616,7 +2694,7 @@ flightPages                = {
     set_user,             --9
     set_home,             --10
     set_simulate,         --11
-    set_att,              --12
+    set_other,            --12
     set_profile,          --13
     set_colortheme,       --14
     shipNet_set_Page,     --15
@@ -2733,7 +2811,7 @@ function modPage:onTouch(x, y)
                                 properties.lock = not properties.lock
                             end
                         else
-                            if v.modeId < 9 or v.modeId >= 12 then
+                            if v.modeId < 8 or v.modeId >= 12 then
                                 properties.mode = v.modeId
                             elseif parentShip.id ~= -1 then
                                 properties.mode = v.modeId
@@ -3327,11 +3405,11 @@ function shipNet_connect_Page:onTouch(x, y)
     if parentShip.id ~= -1 then
         self.window.setCursorPos(2, 3)
     end
-
     if #callList > 0 then --收到请求弹窗
         local halfWidth = self.width / 2
         local halfHeight = self.height / 2
-        if y == halfHeight + 2 then
+        
+        if y == math.floor(halfHeight + 2) then
             if x >= halfWidth - 4 and x < halfWidth - 1 then
                 table.insert(properties.shipNet_whiteList, callList[1].name)
                 accept_connect(callList[1], callList[1].code)
@@ -3378,6 +3456,7 @@ function shipNet_connect_Page:onTouch(x, y)
                 if parentShip.id ~= -1 then
                     if i == 1 then
                         parentShip.id = -1
+                        properties.lastParent = -1
                         break
                     end
                     i2 = i2 - 1
@@ -3619,7 +3698,7 @@ function setPage:init()
         { text = "Home_Set   ",   x = 2,                  pageId = 10, y = 9,                     blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "FollowRange",   x = 2,                  pageId = 25, y = 10,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Simulate   ",   x = 2,                  pageId = 11, y = 11,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
-        { text = "Set_Att    ",   x = 2,                  pageId = 12, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
+        { text = "Set_Other  ",   x = 2,                  pageId = 12, y = 12,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Profile    ",   x = 2,                  pageId = 13, y = 13,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "Colortheme ",   x = 2,                  pageId = 14, y = 14,                    blitF = genStr(font, 11), blitB = genStr(bg, 11), select = genStr(select, 11), selected = false, flag = false },
         { text = "MassFix",       x = 2,                  pageId = 20, y = 15,                    blitF = genStr(font, 7),  blitB = genStr(bg, 7),  select = genStr(select, 7),  selected = false, flag = false },
@@ -4501,50 +4580,44 @@ function set_simulate:onTouch(x, y)
 end
 
 --winIndex = 13
-function set_att:init()
+function set_other:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
     self.indexFlag = 4
     self.buttons = {
-        { text = "<", x = 1,                              y = 1,                               blitF = title, blitB = bg },
-        { text = "w", x = math.floor(self.width / 2) - 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
-        { text = "n", x = math.floor(self.width / 2),     y = math.floor(self.height / 2) - 3, blitF = font,  blitB = bg },
-        { text = "e", x = math.floor(self.width / 2) + 5, y = math.floor(self.height / 2),     blitF = font,  blitB = bg },
-        { text = "s", x = math.floor(self.width / 2),     y = math.floor(self.height / 2) + 3, blitF = font,  blitB = bg }
+        { text = "<",            x = 1, y = 1,     blitF = title, blitB = bg },
+        { text = "--      ++",    x = 5, y = 6,     blitF = "ffffffffff", blitB = "b5ffffff1e" }
     }
+    self.canTp =    { text = "canTeleport", x = 2, y = 3,     blitF = genStr(bg, 11),    blitB = genStr(font, 11) }
+    self.canNotTp = { text = "canTeleport", x = 2, y = 3,     blitF = genStr(font, 11),  blitB = genStr(bg, 11) }
 end
 
-function set_att:refresh()
+function set_other:refresh()
     self:refreshButtons()
     self:refreshTitle()
-    local index
-    if properties.shipFace == "west" then
-        index = 2
-    elseif properties.shipFace == "north" then
-        index = 3
-    elseif properties.shipFace == "east" then
-        index = 4
-    elseif properties.shipFace == "south" then
-        index = 5
+    self.window.setCursorPos(self.canTp.x, self.canTp.y)
+    if properties.canTeleport then
+        self.window.blit(self.canTp.text, self.canTp.blitF, self.canTp.blitB)
+    else
+        self.window.blit(self.canNotTp.text, self.canNotTp.blitF, self.canNotTp.blitB)
     end
-
-    self.window.setCursorPos(self.buttons[index].x, self.buttons[index].y)
-    self.window.blit(self.buttons[index].text, properties.bg, properties.select)
+    self.window.setCursorPos(2, 5)
+    self.window.setTextColor(colors.lightGray)
+    self.window.write("pathRange =")
+    self.window.setCursorPos(2, 6)
+    self.window.setTextColor(colors.white)
+    self.window.write(flight_control.shipLength .. "+")
+    self.window.setCursorPos(9, 6)
+    self.window.write(properties.pathRange)
 end
 
-function set_att:onTouch(x, y)
+function set_other:onTouch(x, y)
     self:subPage_Back(x, y)
-    for k, v in pairs(self.buttons) do
-        if x == v.x and y == v.y then
-            if v.text == "w" then
-                properties.shipFace = "west"
-            elseif v.text == "n" then
-                properties.shipFace = "north"
-            elseif v.text == "e" then
-                properties.shipFace = "east"
-            elseif v.text == "s" then
-                properties.shipFace = "south"
-            end
-        end
+    if y == 3 and x > 2 then
+        properties.canTeleport = not properties.canTeleport
+    elseif y == 6 then
+        local result = 0
+        result = x == 5 and -1 or x == 6 and -0.1 or x == 13 and 0.1 or x == 14 and 1 or 0
+        properties.pathRange = properties.pathRange + result
     end
 end
 
@@ -5376,7 +5449,7 @@ end
 ---------broadcast---------
 beat_ct, call_ct, captcha, calling = 5, 0, genCaptcha(), -1
 local shipNet_beat = function() --广播
-    local auto_connect_cd = 0
+    local auto_connect_cd = 2
     while true do
         if not shutdown_flag then
             ---------发送广播---------
@@ -5451,12 +5524,12 @@ local shipNet_beat = function() --广播
             end
 
             ---------自动连接计时器---------
-            if parentShip.id == -1 and properties.lastParent then --未连接父级且自动连接超时
+            if parentShip.id == -1 and properties.lastParent ~= -1 then --未连接父级且自动连接超时
                 if auto_connect_cd == 0 then
                     shipNet_p2p_send(properties.lastParent, "call")
                 end
                 auto_connect_cd = auto_connect_cd + 1
-                auto_connect_cd = auto_connect_cd > 5 and 0 or auto_connect_cd
+                auto_connect_cd = auto_connect_cd > 3 and 0 or auto_connect_cd
             end
             
         end
