@@ -951,7 +951,7 @@ function flight_control:run(phy)
         z = 0,
     }
 
-    self.rot_face = quat.multiply(self.q_yaw, self.rot)
+    self.rot_face = quat.multiply(quat.nega(self.q_yaw), self.rot)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
@@ -1239,7 +1239,7 @@ function flight_control:airShip()
     if ct then
         rot = self:genRotByEuler(0, resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 32), 0)
         movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.airShip_MOVE_P + -flight_control.velocityRot.y
-        movFor.x = math.deg(math.asin(ct.BTStickRot.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
+        movFor.x = math.deg(math.asin(ct.BTStick.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
     else
         rot = self:genRotByEuler(0, localYaw, 0)
     end
