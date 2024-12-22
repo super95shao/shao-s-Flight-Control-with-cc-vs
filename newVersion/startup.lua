@@ -1238,8 +1238,9 @@ function flight_control:airShip()
     local localYaw = math.atan2(self.pRow.z, self.pRow.x)
     if ct then
         rot = self:genRotByEuler(0, resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 32), 0)
-        movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.airShip_MOVE_P + -flight_control.velocityRot.y
         movFor.x = math.deg(math.asin(ct.BTStick.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
+        movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.airShip_MOVE_P + -flight_control.velocityRot.y
+        movFor.z = math.deg(math.asin(ct.BTStick.x)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
     else
         rot = self:genRotByEuler(0, localYaw, 0)
     end
