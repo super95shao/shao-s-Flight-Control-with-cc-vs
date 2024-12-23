@@ -822,7 +822,7 @@ function flight_control:send_to_childShips()
         local prePos = newVec(self.followPath[1].pos)
         local len = prePos:sub(self.pos):len()
         if len > 0.1 then
-            table.insert(self.followPath, 1, { pos = newVec(self.pos), rot = newQuat(self.rot)})
+            table.insert(self.followPath, 1, { pos = newVec(self.pos), rot = newQuat(self.rot_face)})
         end
 
         --local range = (self.shipLength + properties.pathRange) * 10 
@@ -863,10 +863,10 @@ function flight_control:send_to_childShips()
         
         --commands.execAsync("say ".. #self.followPath)
     else
-        table.insert(self.followPath, { pos = newVec(self.pos), rot = newQuat(self.rot)})
+        table.insert(self.followPath, { pos = newVec(self.pos), rot = newQuat(self.rot_face)})
         followPoint = {
             pos = newVec(self.pX):nega():scale(self.shipLength):add(self.pos),
-            rot = newQuat(self.rot),
+            rot = newQuat(self.rot_face),
         }
     end
     --genParticle(followPoint.pos.x, followPoint.pos.y, followPoint.pos.z)
@@ -876,7 +876,7 @@ function flight_control:send_to_childShips()
         id = computerId,
         name = shipName,
         pos = newVec(self.pos),
-        rot = newQuat(self.rot),
+        rot = newQuat(self.rot_face),
         roll = self.roll,
         preRot = newQuat(self.preRot),
         velocity = newVec(self.velocity),
@@ -950,7 +950,7 @@ function flight_control:run(phy)
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
     --self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
 
-    local yaw_rot = -math.atan2(rowPoint.z, -rowPoint.x) / 2
+    local yaw_rot = math.atan2(rowPoint.z, -rowPoint.x) / 2
     self.q_yaw = {
         w = math.cos(yaw_rot),
         x = 0,
@@ -958,7 +958,7 @@ function flight_control:run(phy)
         z = 0,
     }
 
-    self.rot_face = quat.multiply(quat.nega(self.q_yaw), self.rot)
+    self.rot_face = quat.multiply(self.q_yaw, self.rot)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
@@ -1315,14 +1315,14 @@ function flight_control:PathFollow()
     local frame = parentShip.followPoint
     if frame then
         if properties.pathFollowMode == 1 then
-            self:gotoRot_PD(frame.rot, 9, 26, true)
+            self:gotoRot_PD(frame.rot, 8, 32, true)
         else
             local errPos = newVec(parentShip.pos):sub(self.pos)
             errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
             local eYaw = -math.atan2(errPos.z, -errPos.x)
             local ePitch = math.asin(errPos.y)
             local rot = self:genRotByEuler(ePitch, eYaw, math.rad(parentShip.roll))
-            self:gotoRot_PD(rot, 9, 26)
+            self:gotoRot_PD(rot, 8, 32)
         end
         self:gotoPos_PD(frame.pos, 20, 18)
     else
