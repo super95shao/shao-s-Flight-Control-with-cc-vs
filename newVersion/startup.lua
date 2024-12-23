@@ -1322,7 +1322,7 @@ function flight_control:PathFollow()
             local eYaw = math.atan2(errPos.z, errPos.x)
             local ePitch = math.asin(errPos.y)
             local rot = self:genRotByEuler(ePitch, eYaw, math.rad(parentShip.roll))
-            self:gotoRot_PD(quat.multiply(rot, self.q_yaw), 8, 32)
+            self:gotoRot_PD(quat.multiply(rot, quat.nega(self.q_yaw)), 8, 32)
         end
         self:gotoPos_PD(frame.pos, 20, 18)
     else
