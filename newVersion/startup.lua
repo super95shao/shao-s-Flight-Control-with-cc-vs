@@ -958,7 +958,7 @@ function flight_control:run(phy)
         z = 0,
     }
 
-    self.rot_face = quat.multiply(self.q_yaw, self.rot)
+    self.rot_face = quat.multiply(self.rot, self.q_yaw)
 
     local rot_nega = quat.nega(self.rot)
     self.pos = newVec(poseVel.pos)
@@ -988,7 +988,7 @@ function flight_control:run(phy)
             genParticle(pos.x, pos.y, pos.z)
         end
         self:gotoPos_PD(frame.pos, 18, 20)
-        self:gotoRot_PD(frame.rot, 7, 30, true)
+        self:gotoRot_PD(quat.multiply(frame.rot, quat.nega(self.q_yaw)), 7, 30)
     else
         if modelist[properties.mode].name == "SpaceShip" then
             self:spaceShip()
@@ -1315,7 +1315,7 @@ function flight_control:PathFollow()
     local frame = parentShip.followPoint
     if frame then
         if properties.pathFollowMode == 1 then
-            self:gotoRot_PD(frame.rot, 8, 32, true)
+            self:gotoRot_PD(quat.multiply(frame.rot, quat.nega(self.q_yaw)), 8, 32)
         else
             local errPos = newVec(parentShip.pos):sub(self.pos)
             errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
@@ -1356,13 +1356,9 @@ function flight_control:gotoRot(rot)
     self:gotoRot_PD(rot, 1, 18)
 end
 
-function flight_control:gotoRot_PD(rot, p, d, srr)
+function flight_control:gotoRot_PD(rot, p, d)
     local selfRot
-    if srr then
-        selfRot = newQuat(self.rot_face.w, self.rot_face.x, self.rot_face.y, self.rot_face.z)
-    else
-        selfRot = newQuat(self.rot.w, self.rot.x, self.rot.y, self.rot.z)
-    end
+    selfRot = newQuat(self.rot.w, self.rot.x, self.rot.y, self.rot.z)
     local xp, zp = quat.vecRot(selfRot, newVec(1, 0, 0)), quat.vecRot(selfRot, newVec(0, 0, 1))
     xp = quat.vecRot(quat.nega(rot), xp)
     zp = quat.vecRot(quat.nega(rot), zp)
@@ -1718,7 +1714,7 @@ function replay_listener:run()
             self:refreshMonitor()
             self.cd = 4
         end
-        table.insert(self.rec, { pos = flight_control.pos, rot = flight_control.rot })
+        table.insert(self.rec, { pos = flight_control.pos, rot = flight_control.rot_face })
         self.count = self.count + 1
     end
    
