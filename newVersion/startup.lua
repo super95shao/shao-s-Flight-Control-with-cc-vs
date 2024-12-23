@@ -422,6 +422,7 @@ system.resetProp = function()
         lastParent = -1,
         canTeleport = false,
         pathRange = 0,
+        pathFollowMode = 1,
         profile = {
             keyboard = {
                 spaceShip_P = 1.2,
@@ -835,29 +836,31 @@ function flight_control:send_to_childShips()
         --    end
         --end
         
-        -- 帧范围
-        local range = (self.shipLength + properties.pathRange) * 10
-        if #self.followPath >= range then
-            local lastPoint = self.followPath[range]
-            if lastPoint then
-                followPoint.pos = lastPoint.pos
-                followPoint.rot = lastPoint.rot
+        if properties.pathFollowMode == 1 then --帧范围
+            local range = (self.shipLength + properties.pathRange) * 10
+            if #self.followPath >= range then
+                local lastPoint = self.followPath[range]
+                if lastPoint then
+                    followPoint.pos = lastPoint.pos
+                    followPoint.rot = lastPoint.rot
+                end
+                local len2 = #self.followPath - range
+                for i = 1, len2, 1 do
+                    self.followPath[range] = nil
+                end
             end
-            local len2 = #self.followPath - range
-            for i = 1, len2, 1 do
-                self.followPath[range] = nil
+        else --球形范围
+            while true do
+                local lastPoint = self.followPath[#self.followPath]
+                if newVec(lastPoint.pos):sub(self.pos):len() > self.shipLength + properties.pathRange then
+                    followPoint = { pos = lastPoint.pos, rot = lastPoint.rot }
+                    self.followPath[#self.followPath] = nil
+                else
+                    break
+                end
             end
         end
-
-        --while true do --球形范围
-        --    local lastPoint = self.followPath[#self.followPath]
-        --    if newVec(lastPoint.pos):sub(self.pos):len() > self.shipLength + properties.pathRange then
-        --        followPoint = { pos = lastPoint.pos, rot = lastPoint.rot }
-        --        self.followPath[#self.followPath] = nil
-        --    else
-        --        break
-        --    end
-        --end
+        
         --commands.execAsync("say ".. #self.followPath)
     else
         table.insert(self.followPath, { pos = newVec(self.pos), rot = newQuat(self.rot)})
@@ -867,17 +870,21 @@ function flight_control:send_to_childShips()
         }
     end
     --genParticle(followPoint.pos.x, followPoint.pos.y, followPoint.pos.z)
+    local endPos = newVec(self.pX):nega():scale(self.shipLength - 1 + properties.pathRange):add(self.pos)
     local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
     local msg = {
         id = computerId,
         name = shipName,
         pos = newVec(self.pos),
         rot = newQuat(self.rot),
+        roll = self.roll,
         preRot = newQuat(self.preRot),
         velocity = newVec(self.velocity),
         size = newVec(self.size),
         anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
         followPoint = followPoint,
+        pathFollowMode = properties.pathFollowMode,
+        endPos = endPos
     }
 
     if followPoint then
@@ -1307,8 +1314,17 @@ end
 function flight_control:PathFollow()
     local frame = parentShip.followPoint
     if frame then
+        if properties.pathFollowMode == 1 then
+            self:gotoRot_PD(frame.rot, 9, 26, true)
+        else
+            local errPos = newVec(parentShip.pos):sub(self.pos)
+            errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
+            local eYaw = -math.atan2(errPos.z, -errPos.x)
+            local ePitch = math.asin(errPos.y)
+            local rot = self:genRotByEuler(ePitch, eYaw, math.rad(parentShip.roll))
+            self:gotoRot_PD(rot, 9, 26)
+        end
         self:gotoPos_PD(frame.pos, 20, 18)
-        self:gotoRot_PD(frame.rot, 9, 26, true)
     else
         self:spaceShip()
     end
@@ -4601,14 +4617,25 @@ function set_other:refresh()
     else
         self.window.blit(self.canNotTp.text, self.canNotTp.blitF, self.canNotTp.blitB)
     end
-    self.window.setCursorPos(2, 5)
+    
     self.window.setTextColor(colors.lightGray)
-    self.window.write("pathRange =")
+    self.window.setCursorPos(2, 5)
+    self.window.write("pathFlowRange:")
+    self.window.setCursorPos(2, 8)
+    self.window.write("pathFlowMode:")
     self.window.setCursorPos(2, 6)
     self.window.setTextColor(colors.white)
     self.window.write(flight_control.shipLength .. "+")
     self.window.setCursorPos(9, 6)
     self.window.write(properties.pathRange)
+    self.window.setCursorPos(2, 9)
+    self.window.setBackgroundColor(colors.lightGray)
+    self.window.setTextColor(colors.black)
+    if properties.pathFollowMode == 1 then
+        self.window.write("stepflow")
+    else
+        self.window.write("snake")
+    end
 end
 
 function set_other:onTouch(x, y)
@@ -4619,6 +4646,8 @@ function set_other:onTouch(x, y)
         local result = 0
         result = x == 5 and -1 or x == 6 and -0.1 or x == 13 and 0.1 or x == 14 and 1 or 0
         properties.pathRange = properties.pathRange + result
+    elseif y == 9 then
+        properties.pathFollowMode = properties.pathFollowMode == 1 and 2 or 1
     end
 end
 
@@ -5546,6 +5575,7 @@ local shipNet_getMessage = function() --从广播中筛选
             if id == parentShip.id and msg.code == captcha then --父级飞船发来的消息
                 if msg.pos then
                     parentShip = msg
+                    properties.pathFollowMode = msg.pathFollowMode
                     parentShip.beat = beat_ct
                 end
             end
