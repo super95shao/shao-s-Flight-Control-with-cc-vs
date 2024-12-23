@@ -5604,11 +5604,19 @@ local shipNet_getMessage = function() --从广播中筛选
                         table.insert(shipNet_list, msg)
                     end
                 elseif msg.request_connect == "call" and msg.name and msg.code then --收到连接请求
-                    local result = { id = id, name = msg.name, code = msg.code, ct = 10 }
+                    local result = { id = id, name = msg.name, code = msg.code, ct = 20 }
                     local flag = false
                     for k, v in pairs(properties.shipNet_whiteList) do
                         if msg.name == v then
                             accept_connect(result, msg.code)
+                            flag = true
+                            break
+                        end
+                    end
+
+                    for k, v in pairs(callList) do
+                        if v.id == result.id then
+                            callList[k].ct = 20
                             flag = true
                             break
                         end
@@ -5656,7 +5664,7 @@ shipNet_p2p_send = function(id, type, code) --发送p2p
         if call_ct <= 0 and id ~= parentShip.id then
             rednet.send(id, { name = shipName, code = captcha, request_connect = "call" }, public_protocol)
             calling = id
-            call_ct = 10
+            call_ct = 2
         end
     elseif type == "agree" or type == "refuse" then --回复子级连接
         local result = { name = shipName, code = code, request_connect = "back", result = type }
