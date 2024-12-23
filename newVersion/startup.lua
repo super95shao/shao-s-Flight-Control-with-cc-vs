@@ -836,7 +836,7 @@ function flight_control:send_to_childShips()
         --    end
         --end
         
-        if properties.pathFollowMode == 1 then --帧范围
+        if properties.pathFollowMode == 1 then
             local range = (self.shipLength + properties.pathRange) * 10
             if #self.followPath >= range then
                 local lastPoint = self.followPath[range]
@@ -849,7 +849,7 @@ function flight_control:send_to_childShips()
                     self.followPath[range] = nil
                 end
             end
-        else --球形范围
+        else
             while true do
                 local lastPoint = self.followPath[#self.followPath]
                 if newVec(lastPoint.pos):sub(self.pos):len() > self.shipLength + properties.pathRange then
@@ -972,7 +972,7 @@ function flight_control:run(phy)
 
     self.speed = self.velocity:len()
 
-    if self.replay_index ~= 0 then
+    if self.replay_index ~= 0 and self.recordings.play then
         local frame
         if self.recordings.waiting then
             frame = self.recordings.recordings[1]
@@ -1317,12 +1317,12 @@ function flight_control:PathFollow()
         if properties.pathFollowMode == 1 then
             self:gotoRot_PD(quat.multiply(frame.rot, quat.nega(self.q_yaw)), 8, 32)
         else
-            local errPos = newVec(parentShip.pos):sub(self.pos)
-            errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
-            local eYaw = -math.atan2(errPos.z, -errPos.x)
+            local errPos = newVec(parentShip.pos):sub(self.pos):norm()
+            --errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
+            local eYaw = math.atan2(errPos.z, errPos.x)
             local ePitch = math.asin(errPos.y)
             local rot = self:genRotByEuler(ePitch, eYaw, math.rad(parentShip.roll))
-            self:gotoRot_PD(rot, 8, 32)
+            self:gotoRot_PD(quat.multiply(rot, self.q_yaw), 8, 32)
         end
         self:gotoPos_PD(frame.pos, 20, 18)
     else
