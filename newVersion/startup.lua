@@ -185,7 +185,7 @@ table.copy = function (t)
     return tmp
 end
 
-local pi2 = math.pi * 2
+local pi2, halfPi = math.pi * 2, math.pi / 2
 local resetAngelRange = function(angle)
     if (math.abs(angle) > math.pi) then
         angle = math.abs(angle) >= pi2 and angle % pi2 or angle
@@ -948,7 +948,8 @@ function flight_control:run(phy)
     self.pitch = math.deg(math.asin(self.pX.y))
     self.roll = math.deg(math.asin(self.pZ.y))
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
-    --self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
+    self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
+    --commands.execAsync(("say %d"):format(self.roll))
 
     local yaw_rot = math.atan2(rowPoint.z, -rowPoint.x) / 2
     self.q_yaw = {
@@ -984,9 +985,9 @@ function flight_control:run(phy)
             frame = self.recordings:play(self.replay_index)
         end
         local pos = frame.pos
-        if commands then
-            genParticle(pos.x, pos.y, pos.z)
-        end
+        --if commands then
+        --    genParticle(pos.x, pos.y, pos.z)
+        --end
         self:gotoPos_PD(frame.pos, 18, 20)
         self:gotoRot_PD(quat.multiply(frame.rot, quat.nega(self.q_yaw)), 7, 30)
     else
@@ -1032,6 +1033,8 @@ function flight_control:spaceShip()
     dimension = coordinate.getSelfDimensionType()
     local movFor, rotFor = newVec(), newVec()
     local ct, profile = self:getCtAndProfile()
+    --self:gotoPos(self.lastPos)
+    --self:gotoRot(self:genRotByEuler(0, 0, math.rad(120)))
     
     if properties.lock then
         self:gotoPos(self.lastPos)
@@ -1319,10 +1322,11 @@ function flight_control:PathFollow()
         else
             local errPos = newVec(parentShip.pos):sub(self.pos):norm()
             --errPos = matrixMultiplication_3d(self.faceMatrix3d, errPos):norm()
+            errPos = quat.vecRot(quat.nega(parentShip.rot), errPos)
             local eYaw = math.atan2(errPos.z, errPos.x)
             local ePitch = math.asin(errPos.y)
-            local rot = self:genRotByEuler(ePitch, eYaw, math.rad(parentShip.roll))
-            self:gotoRot_PD(quat.multiply(rot, quat.nega(self.q_yaw)), 8, 32)
+            local rot = self:genRotByEuler(ePitch, eYaw, 0)
+            self:gotoRot_PD(quat.multiply(quat.multiply(parentShip.rot, rot), quat.nega(self.q_yaw)), 8, 32)
         end
         self:gotoPos_PD(frame.pos, 20, 18)
     else
@@ -1373,15 +1377,23 @@ function flight_control:genRotByEuler(pitch, yaw, roll)
     local cosr = math.abs(math.cos(roll))
     local xp = newVec(-math.cos(yaw) * cosp, math.sin(pitch), math.sin(yaw) * cosp)
     local zp = newVec(-math.sin(yaw) * cosr, math.sin(roll), -math.cos(yaw) * cosr)
+
     --commands.execAsync(("say %.2f %.2f %.2f"):format(xp.x, xp.y, xp.z))
     --commands.execAsync(("say %.2f %.2f %.2f"):format(zp.x, zp.y, zp.z))
-    --xp = matrixMultiplication_3d(self.faceMatrix3d, xp)
-    --zp = matrixMultiplication_3d(self.faceMatrix3d, zp)
-    local halfR = math.asin(zp.y) / 2
+
+    local pp = -math.asin(xp.y)
+    local rr = math.asin(zp.y)
+    if math.abs(roll) > halfPi then
+        rr = copysign(math.pi - math.abs(rr), rr)
+    end
+    if math.abs(pitch) > halfPi then
+        pp = copysign(math.pi - math.abs(pp), pp)
+    end
+    local halfR = rr / 2
     local xRot = newQuat(math.cos(halfR), math.sin(halfR), 0, 0)
     local halfY = math.atan2(xp.z, xp.x) / 2
     local yRot = newQuat(math.cos(halfY), 0, math.sin(halfY), 0)
-    local halfP = -math.asin(xp.y) / 2
+    local halfP = pp / 2
     local zRot = newQuat(math.cos(halfP), 0, 0, math.sin(halfP))
     return quat.multiply(quat.multiply(yRot, xRot), zRot)
 end
