@@ -441,8 +441,8 @@ system.resetProp = function()
                 pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1.3,
-                throttle_mid = 0.2,
+                max_throttle = 1.25,
+                throttle_mid = 0.15,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
                 helicopt_ROT_D = 0.5,
@@ -473,8 +473,8 @@ system.resetProp = function()
                 pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1.3,
-                throttle_mid = 0.2,
+                max_throttle = 1.25,
+                throttle_mid = 0.15,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
                 helicopt_ROT_D = 0.5,
@@ -1135,11 +1135,11 @@ local getFpvThrottle = function(mid, t_exp, x)
     local result = 0
     if x < mid then
         x = 1 - (x / mid)
-        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
+        result = (math.pow(x, 4) * t_exp) + x * (1 - t_exp)
         result = mid - result * mid
     else
         x = (x - mid) / (1 - mid)
-        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
+        result = (math.pow(x, 4) * t_exp) + x * (1 - t_exp)
         result = mid + result * (1 - mid)
     end
     return flag and -result or result
@@ -4438,7 +4438,9 @@ function context_pool:click(x, y)
     else
         local max_n = self.height - 2
         local startPoint = self.pageIndex == 1 and 0 or (self.pageIndex - 1) * max_n
-        self.target = self.list[startPoint + (y - self.y)]
+        if self.list[startPoint + (y - self.y)] then
+            self.target = self.list[startPoint + (y - self.y)]
+        end
     end
 end
 
