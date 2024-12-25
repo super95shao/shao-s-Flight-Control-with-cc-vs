@@ -1135,11 +1135,11 @@ local getFpvThrottle = function(mid, t_exp, x)
     local result = 0
     if x < mid then
         x = 1 - (x / mid)
-        result = (math.pow(x, 4) * t_exp) + x * (1 - t_exp)
+        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
         result = mid - result * mid
     else
         x = (x - mid) / (1 - mid)
-        result = (math.pow(x, 4) * t_exp) + x * (1 - t_exp)
+        result = (math.pow(x, 2) * t_exp) + x * (1 - t_exp)
         result = mid + result * (1 - mid)
     end
     return flag and -result or result
