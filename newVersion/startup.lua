@@ -432,17 +432,17 @@ system.resetProp = function()
                 spaceShip_vertMove = 1.5,
                 spaceShip_burner = 3.0,
                 spaceShip_move_D = 1,
-                roll_rc_rate = 1.1,
+                roll_rc_rate = 1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
-                yaw_rc_rate = 1.1,
+                yaw_rc_rate = 1,
                 yaw_s_rate = 0.7,
                 yaw_expo = 0.3,
-                pitch_rc_rate = 1.1,
+                pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1.5,
-                throttle_mid = 0.15,
+                max_throttle = 1,
+                throttle_mid = 0.2,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
                 helicopt_ROT_D = 0.5,
@@ -464,17 +464,17 @@ system.resetProp = function()
                 spaceShip_vertMove = 2,
                 spaceShip_burner = 3.0,
                 spaceShip_move_D = 1.6,
-                roll_rc_rate = 1.1,
+                roll_rc_rate = 1,
                 roll_s_rate = 0.7,
                 roll_expo = 0.3,
-                yaw_rc_rate = 1.1,
+                yaw_rc_rate = 1,
                 yaw_s_rate = 0.7,
                 yaw_expo = 0.3,
-                pitch_rc_rate = 1.1,
+                pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1.5,
-                throttle_mid = 0.15,
+                max_throttle = 1,
+                throttle_mid = 0.2,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
                 helicopt_ROT_D = 0.5,
@@ -492,7 +492,7 @@ system.resetProp = function()
         lock = false,
         zeroPoint = 0,
         gravity = -2,
-        airMass = 1, --空气密度 (风阻)
+        airMass = 2, --空气密度 (风阻)
         rayCasterRange = 128,
         shipFace = "west",
         bg = "f",
@@ -984,7 +984,7 @@ function flight_control:run(phy)
         else
             frame = self.recordings:play(self.replay_index)
         end
-        local pos = frame.pos
+        --local pos = frame.pos
         --if commands then
         --    genParticle(pos.x, pos.y, pos.z)
         --end
