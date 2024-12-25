@@ -1735,7 +1735,7 @@ function replay_listener:run()
         self.count = self.count + 1
     end
    
-    if self.count >= 3600 then
+    if self.count >= 7200 then
         self:check()
         self:update()
         monitorUtil.refreshAll()
