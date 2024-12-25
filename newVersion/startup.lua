@@ -441,7 +441,7 @@ system.resetProp = function()
                 pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1,
+                max_throttle = 1.3,
                 throttle_mid = 0.2,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
@@ -473,7 +473,7 @@ system.resetProp = function()
                 pitch_rc_rate = 1,
                 pitch_s_rate = 0.7,
                 pitch_expo = 0.3,
-                max_throttle = 1,
+                max_throttle = 1.3,
                 throttle_mid = 0.2,
                 throttle_expo = 1.0,
                 helicopt_ROT_P = 0.3,
@@ -1706,9 +1706,14 @@ function replay_listener:check()
 end
 
 function replay_listener:update()
-    local fName = self.fileDir .. "/" .. os.date("%H%M%S") .. ".rec"
-    system.write(fName, self.rec)
-    self.rec = {}
+    if fs.getFreeSpace(".") < 80000 then
+        local fName = self.fileDir .. "/" .. os.date("%H%M%S") .. ".rec"
+        system.write(fName, self.rec)
+        self.rec = {}
+    else
+        self.isRunning = not self.isRunning
+        self.count = 0
+    end
 end
 
 function replay_listener:run()
@@ -1730,7 +1735,7 @@ function replay_listener:run()
         self.count = self.count + 1
     end
    
-    if self.count >= 3600 and fs.getFreeSpace(".") < 80000 then
+    if self.count >= 3600 then
         self:check()
         self:update()
         monitorUtil.refreshAll()
