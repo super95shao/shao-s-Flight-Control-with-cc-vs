@@ -1706,7 +1706,7 @@ function replay_listener:check()
 end
 
 function replay_listener:update()
-    if fs.getFreeSpace(".") < 80000 then
+    if fs.getFreeSpace(".") > 80000 then
         local fName = self.fileDir .. "/" .. os.date("%H%M%S") .. ".rec"
         system.write(fName, self.rec)
         self.rec = {}
