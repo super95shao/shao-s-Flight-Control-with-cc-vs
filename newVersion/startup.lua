@@ -40,6 +40,7 @@ local language = {
     "english"
 }
 
+shell.openTab("shell")
 ----------------------------------------------------
 
 local formatN = function(val, n)
@@ -492,7 +493,7 @@ system.resetProp = function()
         lock = false,
         zeroPoint = 0,
         gravity = -2,
-        airMass = 2, --空气密度 (风阻)
+        airMass = 1, --空气密度 (风阻)
         rayCasterRange = 128,
         shipFace = "west",
         bg = "f",
@@ -821,7 +822,8 @@ function flight_control:send_to_childShips()
     if #self.followPath > 0 then
         local prePos = newVec(self.followPath[1].pos)
         local len = prePos:sub(self.pos):len()
-        if len > 0.1 then
+        local step = 0.025
+        if len > step then
             table.insert(self.followPath, 1, { pos = newVec(self.pos), rot = newQuat(self.rot_face)})
         end
 
@@ -836,23 +838,24 @@ function flight_control:send_to_childShips()
         --    end
         --end
         
+        local range = (self.shipLength + properties.pathRange) * self.scale
+        local range_step = range * 40
         if properties.pathFollowMode == 1 then
-            local range = (self.shipLength + properties.pathRange) * 10
-            if #self.followPath >= range then
-                local lastPoint = self.followPath[range]
+            if #self.followPath >= range_step then
+                local lastPoint = self.followPath[#self.followPath]
                 if lastPoint then
                     followPoint.pos = lastPoint.pos
                     followPoint.rot = lastPoint.rot
                 end
-                local len2 = #self.followPath - range
+                local len2 = #self.followPath - range_step
                 for i = 1, len2, 1 do
-                    self.followPath[range] = nil
+                    self.followPath[#self.followPath] = nil
                 end
             end
         else
             while true do
                 local lastPoint = self.followPath[#self.followPath]
-                if newVec(lastPoint.pos):sub(self.pos):len() > self.shipLength + properties.pathRange then
+                if newVec(lastPoint.pos):sub(self.pos):len() > range then
                     followPoint = { pos = lastPoint.pos, rot = lastPoint.rot }
                     self.followPath[#self.followPath] = nil
                 else
@@ -865,12 +868,12 @@ function flight_control:send_to_childShips()
     else
         table.insert(self.followPath, { pos = newVec(self.pos), rot = newQuat(self.rot_face)})
         followPoint = {
-            pos = newVec(self.pX):nega():scale(self.shipLength):add(self.pos),
+            pos = newVec(self.pX):nega():scale(self.shipLength):scale(self.scale):add(self.pos),
             rot = newQuat(self.rot_face),
         }
     end
     --genParticle(followPoint.pos.x, followPoint.pos.y, followPoint.pos.z)
-    local endPos = newVec(self.pX):nega():scale(self.shipLength - 1 + properties.pathRange):add(self.pos)
+    local endPos = newVec(self.pX):nega():scale(self.shipLength - 1 + properties.pathRange):scale(self.scale):add(self.pos)
     local anchorageWorldPos = getWorldOffsetOfPcPos(properties.anchorage_offset)
     local msg = {
         id = computerId,
@@ -884,6 +887,7 @@ function flight_control:send_to_childShips()
         anchorage = { pos = anchorageWorldPos, entry = entryList[properties.anchorage_entry] },
         followPoint = followPoint,
         pathFollowMode = properties.pathFollowMode,
+        scale = self.scale,
         endPos = endPos
     }
 
@@ -970,6 +974,7 @@ function flight_control:run(phy)
     self.size = engine_controller.getSize()
     self.sizeRot = matrixMultiplication_3d(self.faceMatrix3d, self.size)
     self.shipLength = math.abs(self.sizeRot.x)
+    self.scale = ship.getScale().x
 
     self.speed = self.velocity:len()
 
@@ -1267,7 +1272,7 @@ function flight_control:shipCamera()
 
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local maxSize = math.max(parentShip.size.x, parentShip.size.z)
-    maxSize = math.max(maxSize, parentShip.size.y)
+    maxSize = math.max(maxSize, parentShip.size.y) * parentShip.scale
     local range = newVec(maxSize + xOffset, 0, 0)
 
     if ct then
@@ -1706,7 +1711,7 @@ function replay_listener:check()
 end
 
 function replay_listener:update()
-    if fs.getFreeSpace(".") > 80000 then
+    if fs.getFreeSpace(".") > 160000 then
         local fName = self.fileDir .. "/" .. os.date("%H%M%S") .. ".rec"
         system.write(fName, self.rec)
         self.rec = {}
@@ -1735,7 +1740,7 @@ function replay_listener:run()
         self.count = self.count + 1
     end
    
-    if self.count >= 7200 then
+    if self.count >= 36000 then
         self:check()
         self:update()
         monitorUtil.refreshAll()
@@ -4435,7 +4440,7 @@ function context_pool:click(x, y)
         self.pageIndex = self.pageIndex - 1 < 1 and self.max_page or self.pageIndex - 1
     elseif y == self.y + self.height - 1 then
         self.pageIndex = self.pageIndex + 1 > self.max_page and 1 or self.pageIndex + 1
-    else
+    elseif self.list then
         local max_n = self.height - 2
         local startPoint = self.pageIndex == 1 and 0 or (self.pageIndex - 1) * max_n
         if self.list[startPoint + (y - self.y)] then
@@ -4519,17 +4524,21 @@ local load_recordings = function(path)
     local result = {}
     local fi = 1
     for k, v in pairs(records) do
-        local f = io.open(v, "r")
-        local obj = textutils.unserialise(f:read("a"))
-        f:close()
-        if fi == 1 then
-            result = obj
-        else
-            for i = 1, #obj, 1 do
-                table.insert(result, obj[i])
+        if fs.getSize(v) > 0 then
+            local f = io.open(v, "r")
+            local obj = textutils.unserialise(f:read("a"))
+            f:close()
+            if fi == 1 then
+                result = obj
+            else
+                for i = 1, #obj, 1 do
+                    table.insert(result, obj[i])
+                end
             end
+            fi = fi + 1
+        else
+            fs.delete(v)
         end
-        fi = fi + 1
     end
     return result
 end
@@ -5649,6 +5658,7 @@ local shipNet_getMessage = function() --从广播中筛选
                         parentShip.code = captcha
                         parentShip.pos = msg.pos
                         parentShip.size = msg.size
+                        parentShip.scale = msg.scale
                         parentShip.rot = DEFAULT_PARENT_SHIP.rot
                         parentShip.preQuat = DEFAULT_PARENT_SHIP.rot
                         parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
