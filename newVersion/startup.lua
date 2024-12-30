@@ -983,7 +983,7 @@ function flight_control:run(phy)
         if self.recordings.waiting then
             frame = self.recordings.recordings[1]
             local err = newVec(frame.pos):sub(self.pos)
-            if math.abs(err.x) + math.abs(err.y) + math.abs(err.z) < 0.1 then
+            if math.abs(err.x) + math.abs(err.y) + math.abs(err.z) < 0.025 then
                 self.recordings.waiting = false
             end
         else
