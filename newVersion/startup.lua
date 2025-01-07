@@ -2,7 +2,7 @@ local engine_controller = peripheral.find("EngineController")
 local flight_control, hologram_manager, hologram_prop, controllers, system, properties, monitorUtil, shipNet_p2p_send, scanner, radar, replay_listener
 local shutdown_flag, engineOff = false, false
 local public_protocol = "shipNet_broadcast"
-local protocol, request_protocol = "CBCNetWork", "CBCcenter"
+local protocol, missile_protocol, request_protocol = "CBCNetWork", "CBCMissileNetWork","CBCcenter"
 local shipName, computerId = engine_controller.getName(), os.getComputerID()
 local shipNet_list = {}
 local beat_ct, call_ct, captcha, calling
@@ -1555,7 +1555,7 @@ function radar:run()
     local press_ct = 0
     while true do
         if max_fov_holo.name then
-            local fire = false
+            local fire, missile = false, false
             local ct = controllers.activated
             
             if ct then
@@ -1571,8 +1571,9 @@ function radar:run()
                     end
                     press_ct = 10
                     system:updatePersistentData()
-                elseif ct.A then
-                    fire = true
+                elseif ct.A or ct.B then
+                    fire = ct.A and true or false
+                    missile = ct.B and true or false
                 elseif ct.back and press_ct < 1 then
                     for k, v in pairs(hologram_manager.holograms) do
                         v.screen.SetClearColor(0xFF1111FF)
@@ -1666,17 +1667,30 @@ function radar:run()
                     local index = i % len == 0 and len or i % len
                     local tg = self.final_targets[index]
                     if tg then
-                        rednet.send(linkedCannons[i].id, {
-                            tgPos = newVec(tg.x, tg.y, tg.z),
-                            velocity = tg.velocity,
-                            mode = 3,
-                            fire = fire,
-                            rot = flight_control.rot,
-                            raw_face = engine_controller.getFaceRaw(),
-                            pos = flight_control.pos,
-                            omega = flight_control.omega_raw,
-                            center_velocity = flight_control.velocity,
-                        }, protocol)
+                        if linkedCannons[i].name == "cbc_missile" then
+                            rednet.send(linkedCannons[i].id, {
+                                tgPos = newVec(tg.x, tg.y, tg.z),
+                                velocity = tg.velocity,
+                                rot = flight_control.rot,
+                                raw_face = engine_controller.getFaceRaw(),
+                                pos = flight_control.pos,
+                                omega = flight_control.omega_raw,
+                                center_velocity = flight_control.velocity,
+                                missile = missile,
+                            }, missile_protocol)
+                        else
+                            rednet.send(linkedCannons[i].id, {
+                                tgPos = newVec(tg.x, tg.y, tg.z),
+                                velocity = tg.velocity,
+                                mode = 3,
+                                fire = fire,
+                                rot = flight_control.rot,
+                                raw_face = engine_controller.getFaceRaw(),
+                                pos = flight_control.pos,
+                                omega = flight_control.omega_raw,
+                                center_velocity = flight_control.velocity,
+                            }, protocol)
+                        end
                     end
                 end
             end
