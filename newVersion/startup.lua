@@ -3097,16 +3097,16 @@ function attPage:onTouch(x, y)
             if y == by + 2 and x >= bx - 2 and x <= bx + 10 then
                 local index
                 if mod == "SpaceShip" then
-                    index = 6
+                    index = 5
                 elseif mod == "QuadFPV" then
-                    index = 7
+                    index = 6
                 elseif mod == "Helicopter" then
-                    index = 8
+                    index = 7
                 elseif mod == "AirShip" then
-                    index = 9
+                    index = 8
                 end
                 if index then
-                    self.windows[self.row][self.column][index].indexFlag = 2
+                    self.windows[self.row][self.column][index].indexFlag = 3
                     properties.winIndex[self.name][self.row][self.column] = index
                 end
             elseif y == by + 3 and x >= bx - 2 and x <= bx + 10 then
