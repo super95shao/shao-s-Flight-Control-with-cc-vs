@@ -4,7 +4,10 @@
 
 ### 所以这版通用飞控便诞生了，它使用cc:vs的扩展API作为动力源，可以实现开箱即用，一键部署，十分的方便。xxx
 ### 新版本不再依赖ccvs，而是将所有动力改为虚空动力(void power)mod，
-### 我的目标是使它可以模拟出各种类型的飞行器的操作手感，并具备自动驾驶、寻路、避障等基本功能。
+### 我的目标是使它可以模拟出各种类型的飞行器的操作手感，并具备自动驾驶、寻路、避障等基本功能
+
+### newVersion依赖虚空动力mod，并支持虚空动力的全息屏：
+> https://github.com/dfdyz/VoidPowerMod/tree/main
 
 ### 完整功能需要安装Kallen的MetaPhysics的扫描器API（follow模式、hms_fly模式、切换玩家名等功能需要）
 ### https://github.com/KallenKas024/Metaphysics/
@@ -12,9 +15,6 @@
 > 特别感谢：
 @kallen 提供的metaphysics mod ： 飞控的雷达扫描器、射线检测（方块扫描器）使用了此mod提供的API
 感谢 @kallen 因我的需求增加mod功能
-
-### 虚空动力mod：
-> https://github.com/dfdyz/VoidPowerMod/tree/main
 
 ## newVersion是新版本，重构了核心部分
 > 增加了全息显示器GUI (void power) , 动力从ccvs改为虚空动力的虚空引擎
