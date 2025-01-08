@@ -16,7 +16,7 @@
 ## newVersion是新版本，重构了核心部分，依赖虚空动力mod，并支持虚空动力的全息屏
 > 增加了全息显示器GUI (void power) , 动力从ccvs改为虚空动力的虚空引擎
 > 部署需要一个引擎控制器外设（只能放1个）， 还需要虚空引擎（任意数量，不需要作为外设，只要放在船上就行）
-> https://github.com/dfdyz/VoidPowerMod
+### https://github.com/dfdyz/VoidPowerMod
 
 > 
 ### 更新日志：
