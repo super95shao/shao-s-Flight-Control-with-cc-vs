@@ -356,6 +356,16 @@ system = {
 function system:init()
     properties = system.datFromFile(self.files.propFileName)
     hologram_prop = system.datFromFile(self.files.holograms)
+    local faceVec = engine_controller.getFaceRaw()
+    if faceVec.x == 1 then
+        properties.shipFace = "east"
+    elseif faceVec.x == -1 then
+        properties.shipFace = "west"
+    elseif faceVec.z == 1 then
+        properties.shipFace = "south"
+    else
+        properties.shipFace = "north"
+    end
     system:updatePersistentData()
 end
 
@@ -495,7 +505,7 @@ system.resetProp = function()
         gravity = -2,
         airMass = 2, --空气密度 (风阻)
         rayCasterRange = 128,
-        shipFace = "west",
+        shipFace = "south",
         bg = "f",
         font = "8",
         title = "3",
@@ -5284,6 +5294,9 @@ function screenPickerScreen:refresh()
     self.monitor.clear()
     self.monitor.setCursorPos(1, 1)
     self.monitor.write("Choose screen:")
+
+    self.monitor.setCursorPos(41, 2)
+    self.monitor.write(string.format("Face: %s", properties.shipFace))
     self.monitor.setCursorPos(34, 1)
     self.monitor.write(string.format("Computer_Id: %4d", computerId))
     if #self.rows <= 0 then
