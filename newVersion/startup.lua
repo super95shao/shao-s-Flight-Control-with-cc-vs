@@ -2,7 +2,7 @@ local engine_controller = peripheral.find("EngineController")
 local flight_control, hologram_manager, hologram_prop, controllers, system, properties, monitorUtil, shipNet_p2p_send, scanner, radar, replay_listener
 local shutdown_flag, engineOff = false, false
 local public_protocol = "shipNet_broadcast"
-local protocol, missile_protocol, request_protocol = "CBCNetWork", "CBCMissileNetWork","CBCcenter"
+local protocol, request_protocol = "CBCNetWork", "CBCcenter"
 local shipName, computerId = engine_controller.getName(), os.getComputerID()
 local shipNet_list = {}
 local beat_ct, call_ct, captcha, calling
@@ -1253,9 +1253,9 @@ function flight_control:airShip()
     local localYaw = math.atan2(self.pRow.z, self.pRow.x)
     if ct then
         rot = self:genRotByEuler(0, resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 32), 0)
-        movFor.x = math.deg(math.asin(ct.BTStickRot.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
+        movFor.x = math.deg(math.asin(ct.BTStickRot.y)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.x * profile.helicopt_ACC_D
         movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.airShip_MOVE_P + -flight_control.velocityRot.y
-        movFor.z = math.deg(math.asin(ct.BTStickRot.x)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
+        movFor.z = math.deg(math.asin(ct.BTStickRot.x)) / 2 * profile.helicopt_ACC + -flight_control.velocityRot.z * profile.helicopt_ACC_D
     else
         rot = self:genRotByEuler(0, localYaw, 0)
     end
@@ -1555,7 +1555,7 @@ function radar:run()
     local press_ct = 0
     while true do
         if max_fov_holo.name then
-            local fire, missile = false, false
+            local fire = false
             local ct = controllers.activated
             
             if ct then
@@ -1571,9 +1571,8 @@ function radar:run()
                     end
                     press_ct = 10
                     system:updatePersistentData()
-                elseif ct.A or ct.B then
-                    fire = ct.A and true or false
-                    missile = ct.B and true or false
+                elseif ct.A then
+                    fire = true
                 elseif ct.back and press_ct < 1 then
                     for k, v in pairs(hologram_manager.holograms) do
                         v.screen.SetClearColor(0xFF1111FF)
@@ -1667,30 +1666,17 @@ function radar:run()
                     local index = i % len == 0 and len or i % len
                     local tg = self.final_targets[index]
                     if tg then
-                        if linkedCannons[i].name == "cbc_missile" then
-                            rednet.send(linkedCannons[i].id, {
-                                tgPos = newVec(tg.x, tg.y, tg.z),
-                                velocity = tg.velocity,
-                                rot = flight_control.rot,
-                                raw_face = engine_controller.getFaceRaw(),
-                                pos = flight_control.pos,
-                                omega = flight_control.omega_raw,
-                                center_velocity = flight_control.velocity,
-                                missile = missile,
-                            }, missile_protocol)
-                        else
-                            rednet.send(linkedCannons[i].id, {
-                                tgPos = newVec(tg.x, tg.y, tg.z),
-                                velocity = tg.velocity,
-                                mode = 3,
-                                fire = fire,
-                                rot = flight_control.rot,
-                                raw_face = engine_controller.getFaceRaw(),
-                                pos = flight_control.pos,
-                                omega = flight_control.omega_raw,
-                                center_velocity = flight_control.velocity,
-                            }, protocol)
-                        end
+                        rednet.send(linkedCannons[i].id, {
+                            tgPos = newVec(tg.x, tg.y, tg.z),
+                            velocity = tg.velocity,
+                            mode = 3,
+                            fire = fire,
+                            rot = flight_control.rot,
+                            raw_face = engine_controller.getFaceRaw(),
+                            pos = flight_control.pos,
+                            omega = flight_control.omega_raw,
+                            center_velocity = flight_control.velocity,
+                        }, protocol)
                     end
                 end
             end
