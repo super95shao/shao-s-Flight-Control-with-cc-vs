@@ -4867,9 +4867,9 @@ end
 function abstractMonitor:page_attach_util(name)
     local pageId
     if name == "attPage" then
-        pageId = 2
-    elseif name == "shipNetPage" then
         pageId = 3
+    elseif name == "shipNetPage" then
+        pageId = 2
     end
     local result = {}
     page_attach_manager[self.name][name] = result
