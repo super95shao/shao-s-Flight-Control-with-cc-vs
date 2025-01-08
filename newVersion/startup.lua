@@ -988,7 +988,7 @@ function flight_control:run(phy)
 
     self.speed = self.velocity:len()
 
-    if self.replay_index ~= 0 and self.recordings.play then
+    if self.recordings and self.recordings.play then
         local frame
         if self.recordings.waiting then
             frame = self.recordings.recordings[1]
@@ -1005,6 +1005,9 @@ function flight_control:run(phy)
         --end
         self:gotoPos_PD(frame.pos, 18, 20)
         self:gotoRot_PD(quat.multiply(frame.rot, quat.nega(self.q_yaw)), 7, 30)
+        if controllers.activated then
+            self.recordings = {}
+        end
     else
         if modelist[properties.mode].name == "SpaceShip" then
             self:spaceShip()
@@ -4470,6 +4473,8 @@ function context_pool:click(x, y)
         local startPoint = self.pageIndex == 1 and 0 or (self.pageIndex - 1) * max_n
         if self.list[startPoint + (y - self.y)] then
             self.target = self.list[startPoint + (y - self.y)]
+        else
+            self.target = nil
         end
     end
 end
@@ -4487,7 +4492,7 @@ function recordings:init()
     local bg, other, font, title = properties.bg, properties.other, properties.font, properties.title
     self.indexFlag = 4
     self.buttons = {
-        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "<",   x = 1, y = 1, blitF = title,  blitB = bg },
         { text = "REC", x = 2, y = 10, blitF = "eee", blitB = "fff" },
         { text = "[<]", x = 6, y = 10, blitF = "8b8", blitB = "fff" },
         { text = "[>]", x = 13, y = 10, blitF = "8d8", blitB = "fff" }
@@ -4512,6 +4517,7 @@ function recordings:refresh()
     else
         self:refreshButtons()
         self:refreshTitle()
+
         self.window.setCursorPos(11, 10)
         if properties.autoReplay then
             self.window.blit("A", "8", "f")
