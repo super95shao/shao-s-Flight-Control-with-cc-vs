@@ -196,6 +196,15 @@ local resetAngelRange = function(angle)
     end
 end
 
+local resetAngelRangeDeg = function(angle)
+    if (math.abs(angle) > 180) then
+        angle = math.abs(angle) >= 360 and angle % 360 or angle
+        return -copysign(360 - math.abs(angle), angle)
+    else
+        return angle
+    end
+end
+
 local vector = {}
 local newVec = function (x, y, z)
     if type(x) == "table" then
@@ -514,6 +523,8 @@ system.resetProp = function()
         MAX_MOVE_SPEED = 99,                    --自动驾驶最大跟随速度
         followRange = { x = -1, y = 0, z = 0 }, --跟随距离
         shipFollow_offset = { x = -3, y = 0, z = 0 },
+        shipFollow_use_custom_rotation = false,
+        shipFollow_rotation = { roll = 0, yaw = 0, pitch = 0 },
         pointList = {                           --点循环模式，按照顺序逐个前往
         },
         anchorage_offset = {
@@ -1247,9 +1258,9 @@ function flight_control:helicopter()
     if ct then
         local max_ag = math.rad(profile.helicopt_MAX_ANGLE) * 2 / math.pi
         rot = self:genRotByEuler(
-            -math.asin(ct.RightStickRot.y * max_ag),
+            math.asin(ct.RightStickRot.x * max_ag),
             resetAngelRange(localYaw - math.asin(ct.LeftStick.x) / 2),
-            math.asin(ct.RightStickRot.x * max_ag)
+            -math.asin(ct.RightStickRot.y * max_ag)
         )
         movFor.y = math.deg(math.asin(ct.LeftStick.y)) / 4 * profile.helicopt_ACC + -flight_control.velocityRot.y * profile.helicopt_ACC_D
     else
@@ -1347,7 +1358,7 @@ function flight_control:PathFollow()
             errPos = quat.vecRot(quat.nega(parentShip.rot), errPos)
             local eYaw = math.atan2(errPos.z, errPos.x)
             local ePitch = math.asin(errPos.y)
-            local rot = self:genRotByEuler(ePitch, eYaw, 0)
+            local rot = self:genRotByEuler(0, eYaw, ePitch)
             self:gotoRot_PD(quat.multiply(quat.multiply(parentShip.rot, rot), quat.nega(self.q_yaw)), 8, 32)
         end
         self:gotoPos_PD(frame.pos, 20, 18)
@@ -1364,8 +1375,17 @@ function flight_control:shipFollow()
     local parentQ = quat.multiply(parentShip.rot, quat.nega(self.q_yaw))
     offset = quat.vecRot(parentQ, offset)
     pos = pos:add(offset)
-    self:gotoRot_PD(parentQ, 7, 30)
     self:gotoPos_PD(pos, 18, 20)
+
+    if properties.shipFollow_use_custom_rotation then
+        local localRot = self:genRotByEuler(
+            -math.rad(properties.shipFollow_rotation.roll),
+            resetAngelRange(math.rad(properties.shipFollow_rotation.yaw) + math.pi),
+            -math.rad(properties.shipFollow_rotation.pitch)
+        )
+        parentQ = quat.multiply(parentQ, localRot)
+    end
+    self:gotoRot_PD(parentQ, 7, 30)
 end
 
 function flight_control:gotoPos(pos)
@@ -1394,7 +1414,7 @@ function flight_control:gotoRot_PD(rot, p, d)
     self:pd_rot_control(newVec(xRot, yRot, zRot), p, d)
 end
 
-function flight_control:genRotByEuler(pitch, yaw, roll)
+function flight_control:genRotByEuler(roll, yaw, pitch)
     local cosp = math.abs(math.cos(pitch))
     local cosr = math.abs(math.cos(roll))
     local xp = newVec(-math.cos(yaw) * cosp, math.sin(pitch), math.sin(yaw) * cosp)
@@ -3633,10 +3653,13 @@ function set_shipFollow:init()
         properties.other
     self.indexFlag = 15
     self.buttons = {
-        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
+        { text = "<",             x = 1, y = 1, blitF = title,  blitB = bg },
         { text = "x:--       ++", x = 2, y = 3, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
-        { text = "y:--       ++", x = 2, y = 5, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
-        { text = "z:--       ++", x = 2, y = 7, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
+        { text = "y:--       ++", x = 2, y = 4, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
+        { text = "z:--       ++", x = 2, y = 5, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
+        { text = " roll--    ++", x = 2, y = 7, blitF = genStr(font, 5) .. genStr("f", 8), blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "  yaw--    ++", x = 2, y = 8, blitF = genStr(font, 5) .. genStr("f", 8), blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
+        { text = "pitch--    ++", x = 2, y = 9, blitF = genStr(font, 5) .. genStr("f", 8), blitB = genStr(bg, 5) .. "b5" .. genStr(bg, 4) .. "1e" },
     }
 end
 
@@ -3644,28 +3667,36 @@ function set_shipFollow:refresh()
     self:refreshButtons()
     self:refreshTitle()
     local sp = split(
-        string.format("%d, %d, %d", properties.shipFollow_offset.x, properties.shipFollow_offset.y,
-            properties.shipFollow_offset.z), ", ")
+        string.format("%d, %d, %d, %d, %d, %d", properties.shipFollow_offset.x, properties.shipFollow_offset.y,
+            properties.shipFollow_offset.z, properties.shipFollow_rotation.roll, properties.shipFollow_rotation.yaw, properties.shipFollow_rotation.pitch), ", ")
     local sX, sY, sZ = sp[1], sp[2], sp[3]
+    self.window.setCursorPos(2, 6)
+    if properties.shipFollow_use_custom_rotation then
+        self.window.blit("use_custom_rot", genStr(properties.bg, 14), genStr(properties.select, 14))
+    else
+        self.window.blit("use_custom_rot", genStr(properties.font, 14), genStr(properties.bg, 14))
+    end
     self.window.setCursorPos(7, self.buttons[2].y)
     self.window.blit(string.format("%d", sX), genStr(properties.font, #sX), genStr(properties.bg, #sX))
     self.window.setCursorPos(7, self.buttons[3].y)
     self.window.blit(string.format("%d", sY), genStr(properties.font, #sY), genStr(properties.bg, #sY))
     self.window.setCursorPos(7, self.buttons[4].y)
     self.window.blit(string.format("%d", sZ), genStr(properties.font, #sZ), genStr(properties.bg, #sZ))
+    local sRoll, sYaw, sPitch = sp[4], sp[5], sp[6]
+    self.window.setCursorPos(9, self.buttons[5].y)
+    self.window.blit(string.format("%d", sRoll), genStr(properties.font, #sRoll), genStr(properties.bg, #sRoll))
+    self.window.setCursorPos(9, self.buttons[6].y)
+    self.window.blit(string.format("%d", sYaw), genStr(properties.font, #sYaw), genStr(properties.bg, #sYaw))
+    self.window.setCursorPos(9, self.buttons[7].y)
+    self.window.blit(string.format("%d", sPitch), genStr(properties.font, #sPitch), genStr(properties.bg, #sPitch))
 end
 
 function set_shipFollow:onTouch(x, y)
     self:subPage_Back(x, y)
     if y >= self.buttons[2].y and y <= self.buttons[4].y then
         local result = 0
-        if x == 4 then
-            result = -10
-        elseif x == 5 then result = -1
-        elseif x == 13 then
-            result = 1
-        elseif x == 14 then
-            result = 10
+        if x == 8 then result = -1
+        elseif x == 14 then result = 1
         end
         if y == self.buttons[2].y then
             properties.shipFollow_offset.x = properties.shipFollow_offset.x + result
@@ -3673,6 +3704,22 @@ function set_shipFollow:onTouch(x, y)
             properties.shipFollow_offset.y = properties.shipFollow_offset.y + result
         elseif y == self.buttons[4].y then
             properties.shipFollow_offset.z = properties.shipFollow_offset.z + result
+        end
+    elseif y == 6 then
+        properties.shipFollow_use_custom_rotation = not properties.shipFollow_use_custom_rotation
+    elseif y >= self.buttons[5].y and y <= self.buttons[7].y then
+        local result = 0
+        if x == 7 then result = -10
+        elseif x == 8 then result = -1
+        elseif x == 13 then result = 1
+        elseif x == 14 then result = 10
+        end
+        if y == self.buttons[5].y then
+            properties.shipFollow_rotation.roll = resetAngelRangeDeg(properties.shipFollow_rotation.roll + result)
+        elseif y == self.buttons[6].y then
+            properties.shipFollow_rotation.yaw = resetAngelRangeDeg(properties.shipFollow_rotation.yaw + result)
+        elseif y == self.buttons[7].y then
+            properties.shipFollow_rotation.pitch = resetAngelRangeDeg(properties.shipFollow_rotation.pitch + result)
         end
     end
 end
