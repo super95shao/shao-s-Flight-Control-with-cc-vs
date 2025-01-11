@@ -792,6 +792,7 @@ end
 flight_control = {
     mass = 0,
     omega = newVec(),
+    scale = 1,
     hold = false,
     pos = newVec(),
     pX = newVec(),
@@ -1286,7 +1287,7 @@ function flight_control:shipCamera()
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
     local maxSize = math.max(parentShip.size.x, parentShip.size.z)
     maxSize = math.max(maxSize, parentShip.size.y) * parentShip.scale
-    local minSize = parentShip.size.x * parentShip.scale
+    local minSize = parentShip.size.x / 2 * parentShip.scale
     local range = newVec(maxSize + xOffset, 0, 0)
 
     if ct then
@@ -1295,10 +1296,12 @@ function flight_control:shipCamera()
         xOffset = xOffset > 128 and 128 or xOffset
         range = newVec(maxSize + xOffset, 0, 0)
 
+        local tmp_d = 0.01 * xOffset
+        local rotSpeedWithDis = profile.camera_rot_speed / ( 1 + tmp_d )
         local myRot = newVec(
-            math.asin(ct.RightStick.x) * profile.camera_rot_speed * 2,
-            math.asin(ct.LeftStick.x) * profile.camera_rot_speed,
-            math.asin(ct.LeftStick.y) * profile.camera_rot_speed
+            math.asin(ct.RightStick.x) * profile.camera_rot_speed,
+            math.asin(ct.LeftStick.x) * rotSpeedWithDis,
+            math.asin(ct.LeftStick.y) * rotSpeedWithDis
         )
 
         myRot:scale(0.05)
@@ -1329,7 +1332,7 @@ function flight_control:shipCamera()
     end
     range = quat.vecRot(cameraQuat, range)
     pos = pos:add(range)
-    self:gotoRot_PD(cameraQuat, 2, 24)
+    self:gotoRot_PD(quat.multiply(cameraQuat, quat.nega(self.q_yaw)), 2, 24)
     self:gotoPos_PD(pos, 6, 18)
 end
 
@@ -2025,7 +2028,7 @@ function absHoloGram:initData()
     self.lint_interval = 5
     self.drawHoloBorder = true
     self.drawInputLine = true
-    self.rgb_lock_box = true
+    self.rgb_lock_box = false
     self.other_targets = true
 end
 
@@ -5692,7 +5695,7 @@ local shipNet_getMessage = function() --从广播中筛选
                         parentShip.code = captcha
                         parentShip.pos = msg.pos
                         parentShip.size = msg.size
-                        parentShip.scale = msg.scale
+                        parentShip.scale = 1
                         parentShip.rot = DEFAULT_PARENT_SHIP.rot
                         parentShip.preQuat = DEFAULT_PARENT_SHIP.rot
                         parentShip.velocity = DEFAULT_PARENT_SHIP.velocity
