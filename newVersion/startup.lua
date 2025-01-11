@@ -1296,16 +1296,15 @@ function flight_control:shipCamera()
     local profile = properties.profile[properties.profileIndex]
 
     local pos = newVec(parentShip.pos):add(newVec(parentShip.velocity):scale(0.05))
-    local maxSize = math.max(parentShip.size.x, parentShip.size.z)
-    maxSize = math.max(maxSize, parentShip.size.y) * parentShip.scale
-    local minSize = parentShip.size.x / 2 * parentShip.scale
-    local range = newVec(maxSize + xOffset, 0, 0)
+    local defSize = math.max(math.max(parentShip.size.x, parentShip.size.z), parentShip.size.y) * parentShip.scale
+    local minSize = math.min(math.min(parentShip.size.x, parentShip.size.z), parentShip.size.y) * parentShip.scale
+    local range = newVec(defSize + xOffset, 0, 0)
 
     if ct then
         xOffset = xOffset + math.asin(ct.BTStick.y) * profile.camera_move_speed
         xOffset = xOffset < minSize and minSize or xOffset
         xOffset = xOffset > 128 and 128 or xOffset
-        range = newVec(maxSize + xOffset, 0, 0)
+        range = newVec(minSize + xOffset, 0, 0)
 
         local tmp_d = 0.01 * xOffset
         local rotSpeedWithDis = profile.camera_rot_speed / ( 1 + tmp_d )
