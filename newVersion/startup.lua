@@ -3695,8 +3695,10 @@ function set_shipFollow:onTouch(x, y)
     self:subPage_Back(x, y)
     if y >= self.buttons[2].y and y <= self.buttons[4].y then
         local result = 0
-        if x == 8 then result = -1
-        elseif x == 14 then result = 1
+        if x == 4 then result = -10
+        elseif x == 5 then result = -1
+        elseif x == 13 then result = 1
+        elseif x == 14 then result = 10
         end
         if y == self.buttons[2].y then
             properties.shipFollow_offset.x = properties.shipFollow_offset.x + result
