@@ -3581,19 +3581,6 @@ function set_camera:onTouch(x, y)
         end
     end
 end
-
-function set_shipFollow:init()
-    local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
-        properties.other
-    self.indexFlag = 15
-    self.buttons = {
-        { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
-        { text = "xOffset-    +", x = 2, y = 3, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "yOffset-    +", x = 2, y = 5, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-        { text = "zOffset-    +", x = 2, y = 7, blitF = genStr(font, 7) .. "ffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 4) .. "e" },
-    }
-end
-
 --winIndex = 26
 function set_followRange:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
@@ -3640,16 +3627,16 @@ function set_followRange:onTouch(x, y)
     end
 end
 
---winIndex = 19
+
 function set_shipFollow:init()
     local bg, font, title, select, other = properties.bg, properties.font, properties.title, properties.select,
         properties.other
     self.indexFlag = 15
     self.buttons = {
         { text = "<",             x = 1, y = 1, blitF = title,                       blitB = bg },
-        { text = "xOffset-     +", x = 2, y = 3, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
-        { text = "yOffset-     +", x = 2, y = 5, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
-        { text = "zOffset-     +", x = 2, y = 7, blitF = genStr(font, 7) .. "fffffff", blitB = genStr(bg, 7) .. "b" .. genStr(bg, 5) .. "e" },
+        { text = "x:--       ++", x = 2, y = 3, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
+        { text = "y:--       ++", x = 2, y = 5, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
+        { text = "z:--       ++", x = 2, y = 7, blitF = genStr(font, 2) .. genStr("f", 11), blitB = genStr(bg, 2) .. "b5" .. genStr(bg, 7) .. "1e" },
     }
 end
 
@@ -3660,11 +3647,11 @@ function set_shipFollow:refresh()
         string.format("%d, %d, %d", properties.shipFollow_offset.x, properties.shipFollow_offset.y,
             properties.shipFollow_offset.z), ", ")
     local sX, sY, sZ = sp[1], sp[2], sp[3]
-    self.window.setCursorPos(11, self.buttons[2].y)
+    self.window.setCursorPos(7, self.buttons[2].y)
     self.window.blit(string.format("%d", sX), genStr(properties.font, #sX), genStr(properties.bg, #sX))
-    self.window.setCursorPos(11, self.buttons[3].y)
+    self.window.setCursorPos(7, self.buttons[3].y)
     self.window.blit(string.format("%d", sY), genStr(properties.font, #sY), genStr(properties.bg, #sY))
-    self.window.setCursorPos(11, self.buttons[4].y)
+    self.window.setCursorPos(7, self.buttons[4].y)
     self.window.blit(string.format("%d", sZ), genStr(properties.font, #sZ), genStr(properties.bg, #sZ))
 end
 
@@ -3672,10 +3659,13 @@ function set_shipFollow:onTouch(x, y)
     self:subPage_Back(x, y)
     if y >= self.buttons[2].y and y <= self.buttons[4].y then
         local result = 0
-        if x == 9 then
-            result = -1
-        elseif x == 15 then
+        if x == 4 then
+            result = -10
+        elseif x == 5 then result = -1
+        elseif x == 13 then
             result = 1
+        elseif x == 14 then
+            result = 10
         end
         if y == self.buttons[2].y then
             properties.shipFollow_offset.x = properties.shipFollow_offset.x + result
