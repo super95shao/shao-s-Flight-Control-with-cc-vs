@@ -970,12 +970,12 @@ function flight_control:run(phy)
         {-rowPoint.z, 0, rowPoint.x},
     }
 
-    self.yaw = math.deg(math.atan2(self.pX.z, self.pX.x))
+    self.yaw = -math.deg(math.atan2(self.pX.x, self.pX.z))
     self.pitch = math.deg(math.asin(self.pX.y))
     self.roll = math.deg(math.asin(self.pZ.y))
     self.pitch = self.pY.y > 0 and self.pitch or copysign(180 - math.abs(self.pitch), self.pitch)
     self.roll = self.pY.y > 0 and self.roll or copysign(180 - math.abs(self.roll), self.roll)
-    --commands.execAsync(("say %d"):format(self.roll))
+    --commands.execAsync(("say %d"):format(self.yaw))
 
     local yaw_rot = math.atan2(rowPoint.z, -rowPoint.x) / 2
     self.q_yaw = {
@@ -2944,22 +2944,22 @@ function attPage:refresh()
         end
 
         local xMid = width / 2
-        local xPoint = math.floor(math.cos(math.rad(flight_control.yaw)) * xMid + 0.5)
-        local zPoint = math.floor(math.sin(math.rad(flight_control.yaw)) * xMid + 0.5)
+        local xPoint = math.floor(-math.sin(math.rad(flight_control.yaw)) * xMid + 0.5)
+        local zPoint = math.floor(-math.cos(math.rad(flight_control.yaw)) * xMid + 0.5)
         if flight_control.pX.x > 0 then
             self.window.setCursorPos(xMid + zPoint - xPos, 1)
-            self.window.blit("W", select, bg)
+            self.window.blit("E", select, bg)
         else
             self.window.setCursorPos(xMid - zPoint - xPos, 1)
-            self.window.blit("E", select, bg)
+            self.window.blit("W", select, bg)
         end
 
         if flight_control.pX.z > 0 then
             self.window.setCursorPos(xMid + xPoint - xPos, 1)
-            self.window.blit("N", select, bg)
+            self.window.blit("S", select, bg)
         else
             self.window.setCursorPos(xMid - xPoint - xPos, 1)
-            self.window.blit("S", select, bg)
+            self.window.blit("N", select, bg)
         end
     end
 
