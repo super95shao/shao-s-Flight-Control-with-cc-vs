@@ -1447,6 +1447,8 @@ end
 --------------------------------------------------
 
 scanner = {
+    mobs = {},
+    preMobs = {},
     vsShips = {},
     monsters = {},
     players = {},
@@ -1487,36 +1489,42 @@ function scanner:getPlayer(range)
     return self.players
 end
 
-function scanner:getMonster(scope)
-    self.monsters = coordinate.getMonster(scope)
+function scanner:getMobs(scope)
+    self.mobs = coordinate.getMobs(scope)
 
-    for k, v in pairs(self.preMonster) do
+    for k, v in pairs(self.preMobs) do
         v.flag = false
     end
 
-    if scanner.monsters ~= nil then
-        for k, v in pairs(scanner.monsters) do
-            if scanner.preMonster[k] then
+    scanner.monsters = {}
+    if scanner.mobs ~= nil then
+        for k, v in pairs(scanner.mobs) do
+            if scanner.preMobs[k] then
                 v.velocity = {
-                    x = v.x - scanner.preMonster[v.uuid].x,
-                    y = v.y - scanner.preMonster[v.uuid].y,
-                    z = v.z - scanner.preMonster[v.uuid].z
+                    x = v.x - scanner.preMobs[v.uuid].x,
+                    y = v.y - scanner.preMobs[v.uuid].y,
+                    z = v.z - scanner.preMobs[v.uuid].z
                 }
             else
                 v.velocity = newVec()
             end
+
+            if v.name == "monster" then
+                scanner.monsters[v.uuid] = v
+            end
+
             v.flag = true
-            scanner.preMonster[v.uuid] = v
+            scanner.preMobs[v.uuid] = v
         end
     end
 
-    for k, v in pairs(self.preMonster) do
+    for k, v in pairs(self.preMobs) do
         if not v.flag then
-            self.preMonster[k] = nil
+            self.preMobs[k] = nil
         end
     end
 
-    return self.monsters
+    return self.mobs, self.monsters
 end
 
 function scanner:getCommander()
@@ -1597,10 +1605,10 @@ function radar:run()
                 if (ct.left or ct.right or ct.Y) and press_ct < 1 then
                     if ct.left then
                         properties.radarMode = properties.radarMode - 1
-                        properties.radarMode = properties.radarMode < 1 and 4 or properties.radarMode
+                        properties.radarMode = properties.radarMode < 1 and 5 or properties.radarMode
                     elseif ct.right then
                         properties.radarMode = properties.radarMode + 1
-                        properties.radarMode = properties.radarMode > 4 and 1 or properties.radarMode
+                        properties.radarMode = properties.radarMode > 5 and 1 or properties.radarMode
                     elseif ct.Y then
                         properties.radar_lock_mode = not properties.radar_lock_mode
                     end
@@ -1632,9 +1640,11 @@ function radar:run()
                 isShip = true
                 targets = scanner:getShips(properties.radarRange)
             elseif properties.radarMode == 3 then --monster
-                targets = scanner:getMonster(properties.radarRange)
+                _, targets = scanner:getMobs(properties.radarRange)
             elseif properties.radarMode == 4 then --player
                 targets = scanner:getPlayer(properties.radarRange)
+            elseif properties.radarMode == 5 then --mobs
+                targets, _ = scanner:getMobs(properties.radarRange)
             end
 
             self.targets = {}
@@ -1852,6 +1862,8 @@ _73a9 = {
     0,0,0,1,1,1,0,1,1,0,0,0,0,0,0,1,1,1,1,1,1,1,1,0,1,0,1,0,0,1,0,1,0,1,0,1,1,0,1,0,1,0,0,0,1,0,0,1,1,}, --玩
 _5bb6 = {
     0,0,0,1,0,0,0,1,1,1,1,1,1,1,1,0,1,1,1,0,1,0,0,1,1,0,0,0,1,1,0,1,1,0,1,0,0,1,0,1,1,0,1,1,0,1,1,0,1,}, --家
+_751f = {
+    0,1,0,1,0,0,0,0,1,1,1,1,1,1,1,0,0,1,0,0,0,0,0,0,1,0,0,0,0,1,1,1,1,1,0,0,0,0,1,0,0,0,1,1,1,1,1,1,1,}, --生
 }
 
 local my_5x5_letter = {
@@ -2042,7 +2054,7 @@ function absHoloGram:initData()
     self.attBorder = new2dVec(0.1, 0.1)
     self.msg_bar_offset = 0.9
     self.cannon_bar_offset = 0.6
-    self.target_bar_offset = 0.85
+    self.target_bar_offset = 0.80
     self.attSize = 1
     self.lint_interval = 5
     self.drawHoloBorder = true
@@ -2073,7 +2085,7 @@ function absHoloGram:init()
     self.cannonCountPos = new2dVec(-0.9, self.cannon_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     self.targetPos = new2dVec(0, self.target_bar_offset):scaleVec(self.midPoint):add(self.midPoint)
     local per_pix_for_pers = 1 / self.midPoint.y
-    local hp_h = copysign(math.abs(self.target_bar_offset) + 2 * per_pix_for_pers, self.target_bar_offset)
+    local hp_h = copysign(math.abs(self.target_bar_offset) + 6 * per_pix_for_pers, self.target_bar_offset)
     self.hp_pos_start = new2dVec(-0.3, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     self.hp_pos_end = new2dVec(0.3, hp_h):scaleVec(self.midPoint):add(self.midPoint)
     self.hp_bar_len = 0.6
@@ -2300,6 +2312,12 @@ function absHoloGram:radarPage()
             self:draw_7x7_fonts(self.radarModePos, "_73a9,_5bb6")
         else
             self:draw_5x5_letter(self.radarModePos, "player", "white")
+        end
+    elseif properties.radarMode == 5 then --mobs
+        if properties.language == language[1] then
+            self:draw_7x7_fonts(self.radarModePos, "_751f,_7269")
+        else
+            self:draw_5x5_letter(self.radarModePos, "mobs", "white")
         end
     end
     
