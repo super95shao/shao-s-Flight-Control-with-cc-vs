@@ -737,6 +737,14 @@ function controllers:getAll()
     end
 end
 
+local getUserByUUID = function(uuid)
+    for k, v in pairs(scanner.players) do
+        if v.uuid == uuid then
+            return v.name
+        end
+    end
+end
+
 function controllers:run()
     while true do
         local flag = true
