@@ -745,7 +745,11 @@ function controllers:run()
                 v:refresh()
                 if v.hasUser then
                     v:rot()
-                    self.activated = v
+                    if self.activated ~= v then
+                        self.activated = v
+                        properties.userName = getUserByUUID(v.joy.getUserUUID())
+                        system:updatePersistentData()
+                    end
                     flag = false
                     break
                 end
