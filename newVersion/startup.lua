@@ -1305,6 +1305,10 @@ end
 
 local cameraQuat = quat.new()
 local xOffset = 0
+
+
+
+
 function flight_control:fixedWing()
     local ct, profile = self:getCtAndProfile()
 
@@ -1315,51 +1319,98 @@ function flight_control:fixedWing()
     local pitch_D  = profile.fixedWing_pitch_D  or 2.0
     local yaw_P    = profile.fixedWing_yaw_P    or 1.0
     local yaw_D    = profile.fixedWing_yaw_D    or 2.0
-    local max_accel      = profile.fixedWing_max_accel      or 20   -- 最大加速度 (m/s²)
-    local slip_damping   = profile.fixedWing_slip_damping   or 2.0  -- 侧滑阻尼 (Z轴)
-    local alpha_damping  = profile.fixedWing_alpha_damping  or 2.0  -- 攻角阻尼 (Y轴)
-    local speed_P        = profile.fixedWing_speed_P        or 2.0  -- 速度控制比例增益
-    local speed_change_rate = profile.fixedWing_speed_change_rate or 5  -- 速度改变速率 (m/s²)
+    local max_accel      = profile.fixedWing_max_accel      or 20
+    local slip_damping   = profile.fixedWing_slip_damping   or 2.0
+    local alpha_damping  = profile.fixedWing_alpha_damping  or 2.0
+    local speed_P        = profile.fixedWing_speed_P        or 2.0
+    local speed_change_rate = profile.fixedWing_speed_change_rate or 5
+    local roll_to_yaw_gain = profile.fixedWing_roll_to_yaw_gain or 0.5  -- 滚转对航向的影响增益
 
     -- 初始化目标速度（如果不存在）
     if not self.target_speed then
         self.target_speed = 0
     end
 
-    -- 旋转控制：右摇杆俯仰/滚转，左摇杆左右偏航
+    -- 获取期望角速率（来自控制器或自动驾驶）
     local desired_roll_rate  = 0
     local desired_pitch_rate = 0
     local desired_yaw_rate   = 0
     if ct then
-        local max_roll_rate  = 180   -- 度/秒
+        local max_roll_rate  = 180
         local max_pitch_rate = 180
         local max_yaw_rate   = 90
         desired_roll_rate  = ct.RightStickRot.x * max_roll_rate
         desired_pitch_rate = ct.RightStickRot.y * max_pitch_rate
         desired_yaw_rate   = ct.LeftStick.x      * max_yaw_rate
-        
+
         -- 左摇杆上下控制目标速度
         local speed_input = ct.LeftStick.y
-        self.target_speed = self.target_speed + speed_input * speed_change_rate * 0.016  -- 假设16ms调用一次
-        -- 限制目标速度范围
-        self.target_speed = math.max(0, self.target_speed)  -- 最小速度为0
+        self.target_speed = self.target_speed + speed_input * speed_change_rate * 0.016
+        self.target_speed = math.max(0, self.target_speed)
     end
 
+    -- ===== 飞控保护：限制滚转角不超过 ±45° =====
+   
+ --   if current_roll > 45 and desired_roll_rate > 0 then
+ --       desired_roll_rate = 0
+  --  elseif current_roll < -45 and desired_roll_rate < 0 then
+  --      desired_roll_rate = 0
+  --  end
+
+    -- ===== 飞控保护：限制俯仰角不超过 ±60° =====
+  
+   -- if current_pitch > 60 and desired_pitch_rate > 0 then
+   --     desired_pitch_rate = 0
+   -- elseif current_pitch < -60 and desired_pitch_rate < 0 then
+   --     desired_pitch_rate = 0
+   -- end
+
+    -- ===== 协调转弯：根据滚转角自动生成偏航速率 =====
+     local current_pitch = self.pitch
+    local current_roll = self.roll
+    local max_yaw_rate = 90  -- 度/秒
+    local roll_rad = math.rad(current_roll)
+    local auto_yaw_rate = 0
+    if (math.abs(current_roll) < 85 )and self.target_speed > 3  then
+        auto_yaw_rate = math.deg ( math.sin(roll_rad)*10/self.target_speed  )
+    end
+    desired_yaw_rate = desired_yaw_rate + auto_yaw_rate
+    desired_pitch_rate = desired_pitch_rate +auto_yaw_rate* math.tan(roll_rad)
+    if (math.abs(current_roll) > 50 and (math.abs(current_roll))<60 ) then
+        desired_roll_rate= desired_roll_rate +70*math.abs(current_roll)/current_roll-- 如果bankangle大于50小于60就尝试救回50，使用较小的力度
+    end
+    if (math.abs(current_roll) >= 60 and (math.abs(current_roll))<80 ) then
+        desired_roll_rate= desired_roll_rate +140*math.abs(current_roll)/current_roll-- 如果bankangle大于60但小于70就尝试救回60，但不超过杆的权限
+    end
+    if (math.abs(current_pitch) > 30 and (math.abs(current_pitch))<60 ) then
+        desired_pitch_rate= desired_pitch_rate -70*math.abs(current_pitch)/current_pitch-- 如果pitch大于60但小于70就尝试救回60，但不超过杆的权限
+    end
+    if (math.abs(current_pitch) >= 60 and (math.abs(current_pitch))<85 ) then
+        desired_pitch_rate= desired_pitch_rate -140*math.abs(current_pitch)/current_pitch-- 如果pitch大于60但小于70就尝试救回60，但不超过杆的权限
+    end
+    
+     
+    local max_roll_cmd  = 180   -- 最大允许滚转指令 (度/秒)
+    local max_pitch_cmd = 180   -- 最大允许俯仰指令
+    local max_yaw_cmd   = 90    -- 最大允许偏航指令
+--    desired_roll_rate  = math.max(-max_roll_cmd, math.min(max_roll_cmd, desired_roll_rate))
+--    desired_pitch_rate = math.max(-max_pitch_cmd, math.min(max_pitch_cmd, desired_pitch_rate))
+--    desired_yaw_rate   = math.max(-max_yaw_cmd, math.min(max_yaw_cmd, desired_yaw_rate))
     -- 转换为弧度/秒
     desired_roll_rate  = math.rad(desired_roll_rate)
     desired_pitch_rate = math.rad(desired_pitch_rate)
     desired_yaw_rate   = math.rad(desired_yaw_rate)
 
     -- 当前本地角速度
-    local current_roll  = self.omega.x
-    local current_yaw   = self.omega.y
-    local current_pitch = self.omega.z
+    local current_roll_rate  = self.omega.x
+    local current_yaw_rate   = self.omega.y
+    local current_pitch_rate = self.omega.z
 
     -- 计算旋转力矩（PD控制）
     local inertia = self.momentOfInertiaTensor
-    local torque_x = (desired_roll_rate  * roll_P - current_roll  * roll_D) * inertia[1][1]
-    local torque_y = (desired_yaw_rate   * yaw_P  - current_yaw   * yaw_D)  * inertia[2][2]
-    local torque_z = (desired_pitch_rate * pitch_P - current_pitch * pitch_D) * inertia[3][3]
+    local torque_x = (desired_roll_rate  * roll_P - current_roll_rate  * roll_D) * inertia[1][1]
+    local torque_y = (desired_yaw_rate   * yaw_P  - current_yaw_rate   * yaw_D)  * inertia[2][2]
+    local torque_z = (desired_pitch_rate * pitch_P - current_pitch_rate * pitch_D) * inertia[3][3]
     applyRotDependentTorque(torque_x, torque_y, torque_z)
 
     -- 速度控制：消除侧滑(Z)和攻角(Y)，保持纵向速度(X)稳定
@@ -1375,18 +1426,34 @@ function flight_control:fixedWing()
     -- 速度保持控制（X轴）
     local speed_error = self.target_speed - vx
     local desired_accel_x = speed_error * speed_P
-    -- 限制加速度
     desired_accel_x = math.max(-max_accel, math.min(max_accel, desired_accel_x))
     local force_x = desired_accel_x * self.mass
 
     local force_local = newVec(force_x, force_y, force_z)
     applyRotDependentForce(force_local.x, force_local.y, force_local.z)
 
-    -- 自动抵消重力（始终生效）
-    local gravity_force_world = newVec(0, 10 * self.mass, 0)
-    local gravity_force_local = quat.vecRot(quat.nega(self.rot), gravity_force_world)
-    applyRotDependentForce(gravity_force_local.x, gravity_force_local.y, gravity_force_local.z)
+    -- 自动抵消重力（速度大于3生效）
+    if self.target_speed > 3 and self.target_speed < 10 then
+        local gravity_force_world = newVec(0, self.target_speed * self.mass, 0)
+        local gravity_force_local = quat.vecRot(quat.nega(self.rot), gravity_force_world)
+        applyRotDependentForce(gravity_force_local.x, gravity_force_local.y, gravity_force_local.z)
+    end
+    if self.target_speed >= 10  then
+        local gravity_force_world = newVec(0, 10 * self.mass, 0)
+        local gravity_force_local = quat.vecRot(quat.nega(self.rot), gravity_force_world)
+        applyRotDependentForce(gravity_force_local.x, gravity_force_local.y, gravity_force_local.z)
+    end
+
 end
+
+
+
+
+
+
+
+
+
 function flight_control:shipCamera()
     local ct = controllers.activated
     local profile = properties.profile[properties.profileIndex]
